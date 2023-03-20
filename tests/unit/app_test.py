@@ -1,0 +1,34 @@
+# Copyright 2023 Schlumberger
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import os
+from unittest import mock
+import pytest
+from fastapi.testclient import TestClient
+from wdmsworker.app import base
+from wdmsworker import constants
+
+
+@pytest.fixture(autouse=True)
+def mock_settings_env_vars(tmp_path):
+    # force local
+    with mock.patch.dict(
+        os.environ, {constants.CLOUD_PROVIDER_ENV_VAR: "local", "USE_LOCALFS_BLOB_STORAGE_WITH_PATH": str(tmp_path)}
+    ):
+        yield
+
+
+def test_app_can_be_mounted():
+    with TestClient(base) as client:
+        assert client.get(constants.API_PREFIX + "/healthz").status_code == 200

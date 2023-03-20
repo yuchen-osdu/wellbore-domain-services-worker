@@ -1,0 +1,93 @@
+# Copyright 2023 Schlumberger
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Default values for os-wellbore-ddms.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+namespace: osdu
+deployment:
+  instrumentationKey:
+    secretName: central-logging
+  osduSvcProperties: osdu-svc-properties
+  keyvaultUrlPropertyName: ENV_KEYVAULT
+  name: os-wellbore-ddms-worker
+
+isAutoscalingEnabled: false
+maxReplicaCount: 2
+minReplicaCount: 2
+replicaCount: 2
+
+# Undefined by default, but you can specify it if needed
+# nodepool: services
+
+resources:
+ limits:
+   memory: 2Gi
+   cpu: 4
+ requests:
+   memory: 256Mi
+   cpu: 1
+
+probes:
+  startup:
+    failureThreshold: 6
+    periodSeconds: 5
+  liveness:
+    initialDelaySeconds: 15
+    periodSeconds: 5
+    timeoutSeconds: 1
+    failureThreshold: 3
+  readiness:
+    initialDelaySeconds: 5
+    timeoutSeconds: 5
+
+annotations:
+  buildNumber: []
+  buildOrigin: AzureDevops build/#{Build.DefinitionName}#
+  commitBranch: []
+  commitId: []
+
+image:
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: latest
+
+
+tempDeployment:
+  enabled: false
+  name: prxxxx
+
+labels:
+  aadpodidbinding: osdu-identity
+  env: gitlab
+
+configMap:
+  data:
+    partitionEndpoint: http://partition.osdu/api/partition
+    usePartitionService: 'enabled'
+    environmentName: gitlab
+  name: os-wellbore-ddms-envs-worker
+
+ingress:
+  enabled: false
+  hosts:
+    host: # leave it empty for our dev cluster
+    pathPrefix: /api/wdms-worker
+  tlsSecret: osdu-certificate
+
+authorizationPolicy:
+  name: wellbore-jwt-authz
+
+
+istioDnsHost: #{ISTIO_DNS_HOST}#

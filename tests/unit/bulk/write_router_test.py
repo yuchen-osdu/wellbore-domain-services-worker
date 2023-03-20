@@ -1,0 +1,41 @@
+# Copyright 2023 Schlumberger
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import pytest
+from fastapi import HTTPException
+from unittest.mock import patch, AsyncMock
+from wdmsworker.bulk.write_errors import BulkValidationError
+from wdmsworker.bulk.write_router import post_bulk_chunk_in_session_route
+
+
+@pytest.mark.anyio
+async def test_post_bulk_chunk_in_session_route_use_writer():
+    # not sure if this test actually make sens
+    with patch("wdmsworker.bulk.write_router.writer.write_bulk_data_in_session", AsyncMock()) as mock:
+        await post_bulk_chunk_in_session_route("rid", "sid", AsyncMock(), AsyncMock(), AsyncMock())
+
+        mock.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_post_bulk_chunk_in_session_route_bulk_validation_is_a_422():
+    with patch(
+        "wdmsworker.bulk.write_router.writer.write_bulk_data_in_session",
+        AsyncMock(side_effect=BulkValidationError("fake validation error")),
+    ):
+        with pytest.raises(HTTPException) as e:
+            await post_bulk_chunk_in_session_route("rid", "sid", AsyncMock(), AsyncMock(), AsyncMock())
+        actual_exc = e.value
+        assert actual_exc.status_code == 422
+        assert "fake validation error" in actual_exc.detail

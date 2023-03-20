@@ -1,0 +1,57 @@
+# Copyright 2023 Schlumberger
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Template pipeline used to build and test the worker with different python versions
+
+parameters:
+- name: python_version
+  type: string
+  default: ''
+
+steps:
+# Use Python version
+# Use the specified version of Python from the tool cache, optionally adding it to the PATH
+- task: UsePythonVersion@0
+  inputs:
+    versionSpec: ${{ parameters.python_version }}
+    addToPath: true
+    architecture: 'x64'
+
+- bash: |
+    pip install -e ".[dev]"
+    
+    # used to publish tests results
+    pip install pytest-azurepipelines
+  displayName: 'setup environment'
+  env:
+    PIP_EXTRA_INDEX_URL: https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple
+
+- bash: |
+    pytest -s --log-cli-level=INFO --junitxml=report_tests_unit.xml -o junit_suite_name=wdms_worker_ut_${{ parameters.python_version }} --cov=wdmsworker --cov-report=xml --cov-report=html --test-run-title='Worker unit tests' ./tests/unit
+  displayName: 'Run unit tests'
+
+- bash: |
+    pytest -s --no-subprocess --log-cli-level=INFO --junitxml=report_tests_srv2.xml -o junit_suite_name=wdms_worker_srv2_${{ parameters.python_version }} --cov=wdmsworker --cov-append --cov-report=xml --test-run-title='Worker service tests' ./tests/service
+  displayName: 'Run service tests - subprocess'
+
+- bash: |
+    # remove coverage args because already gathered above
+    pytest -s --log-cli-level=INFO ./tests/service
+  displayName: 'Run service tests'
+
+
+- task: PublishCodeCoverageResults@1
+  inputs:
+    codeCoverageTool: 'Cobertura'
+    summaryFileLocation: '$(System.DefaultWorkingDirectory)/**/coverage.xml'

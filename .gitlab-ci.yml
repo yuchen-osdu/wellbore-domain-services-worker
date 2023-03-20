@@ -1,0 +1,26 @@
+default:
+  image: python:3.10-slim-bullseye
+
+stages:
+  - test
+
+build:
+  stage: test
+  script:
+    - ./.gitlab-run-tests.sh
+  artifacts:
+    when: always
+    reports:
+      junit: report.xml
+
+mr_build:
+  stage: test
+  script:
+    - ./.gitlab-run-tests.sh
+  artifacts:
+    when: always
+    reports:
+      junit: report.xml
+  only:
+    - merge_requests
+

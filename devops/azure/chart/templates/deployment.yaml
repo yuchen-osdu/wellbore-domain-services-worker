@@ -1,0 +1,105 @@
+# Copyright 2023 Schlumberger
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+{{$nameSuffix := include "os-wellbore-ddms-worker.name-suffix" .}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+{{ include "os-wellbore-ddms-worker.commonAnnotations" . | indent 4}}
+  labels:
+{{ include "os-wellbore-ddms-worker.commonLabels" . | indent 4}}
+  name: {{ .Values.deployment.name }}{{ $nameSuffix }}
+{{ include "os-wellbore-ddms-worker.namespace" . | indent 2}}
+spec:
+  {{- if not .Values.isAutoscalingEnabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+{{ include "os-wellbore-ddms-worker.commonLabels" . | indent 6}}
+  template:
+    metadata:
+      annotations:
+{{ include "os-wellbore-ddms-worker.commonAnnotations" . | indent 8}}
+      labels:
+        aadpodidbinding: "{{ .Values.labels.aadpodidbinding }}"
+{{ include "os-wellbore-ddms-worker.commonLabels" . | indent 8}}
+    spec:   
+{{- if .Values.nodepool }}
+      nodeSelector:
+        agentpool: {{ .Values.nodepool }} 
+{{- end }}   
+      volumes:
+        # Note:
+        # This volume is required for pod-identity access mode (https://github.com/Azure/secrets-store-csi-driver-provider-azure/blob/master/docs/pod-identity-mode.md)
+        # Even if not directly used by the application, it is still required indirectly to allow the secretProviderClass to sync the secret, because the secret is only created as a side effect of workload mounting its content. 
+        # 
+        # Some more explanation:
+        # https://github.com/Azure/secrets-store-csi-driver-provider-azure/issues/132#issuecomment-646349209
+        # "It's not possible to only sync as a kubernetes secret and not have the contents mounted as files in the pod. The sync as K8s secret is done by getting the contents from the fs."
+        - name: azure-keyvault
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: "azure-keyvault"
+      containers:
+      - name: {{ .Values.deployment.name }}      
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+        ports:
+          - containerPort: 8080
+        # This preStop hook has been added as a temporary workaround to minimize downtime during deployments until this limitation is addressed at the AGIC level
+        lifecycle:
+          preStop:
+            exec:
+              command: ["sleep", "15"]
+        envFrom:
+        - configMapRef:
+            name: {{ .Values.configMap.name }}{{ $nameSuffix }}
+        env:
+        - name: AZ_AI_INSTRUMENTATION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.deployment.instrumentationKey.secretName }}
+              key: appinsights
+        - name: KEYVAULT_URL
+          valueFrom:
+            configMapKeyRef:
+              name: {{ .Values.deployment.osduSvcProperties }}
+              key: {{ .Values.deployment.keyvaultUrlPropertyName }}
+        - name: SERVICE_NAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.labels['app']
+        volumeMounts:
+          # This mount is not used by the application but is required for the secretProviderClass
+          # See more comment on the Volume definition
+          - mountPath: /azure-keyvault
+            name: azure-keyvault
+            readOnly: true
+        resources:
+          {{ toYaml .Values.resources | nindent 10 }}
+        livenessProbe:
+          httpGet:
+            path: {{ include "os-wellbore-ddms-worker.prefix" . }}/healthz
+            port: 8080
+          {{ toYaml .Values.probes.liveness | nindent 10 }}
+        readinessProbe:
+          httpGet:
+            path: {{ include "os-wellbore-ddms-worker.prefix" . }}/readiness
+            port: 8080
+          {{ toYaml .Values.probes.readiness | nindent 10 }}
+      terminationGracePeriodSeconds: 45

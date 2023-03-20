@@ -1,0 +1,209 @@
+# Copyright 2023 Schlumberger
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""
+Utility functions that gathers method to build path for bulk storage
+"""
+
+import hashlib
+from os.path import relpath
+from os.path import join as os_path_join, basename as os_path_basename
+import time
+from re import compile
+import pickle
+import base64
+
+# TODO [TAG pandas dependent]
+import pandas as pd
+
+"""
+bulk path organization.
+
+for each record, there's a base folder which is based on the record id (hash of it). This base folder, linked to a
+given record, is named:
+ - `record_path_level_0`
+
+from this `record_path_level_0` there are 2 sub folders, `session` and `bulk`.
+
+Under the `session` sub folder will go all data sent or generated during a session. This mainly include the chunks
+and related meta file. To differentiate two sessions, there's a sub folder with named by the session id.
+This sub folder with be referred as `session_path_level_1`.
+
+Under the `bulk` will go all data either unrelated to a session (for instance when bulk are sent without session) or
+generated at session commit. Similarly to session, bulk for a given version is identified by an id and so for each
+there's a sub folder using this id to separate versions. A session commit, an index and the bulk catalog are generated
+and then stored under this folder.
+This sub folder with be referred as `bulk_path_level_1`.
+
+Note for performance reason, chunks stored within a session are not moved nor copied from the `session` sub-folder into
+the `bulk` sub-folder. Instead the bulk catalog simply reference the chunk from `record_path_level_0`.
+
+For a record where bulk were sent within a session broken down into 2 chunks, the folder tree will looks like that:
+
+.
+└── record_id_hash (record_path_level_0)/
+    ├── session/
+    │   └── session_id_1/
+    │       └── data (session_path_level_1)/
+    │           ├── chunk1.parquet
+    │           ├── chunk1.meta
+    │           ├── chunk2.parquet
+    │           └── chunk2.meta
+    └── bulk/
+        └── bulk_id_1/
+            └── data (bulk_path_level_1)/
+                ├── bulk_catalog.json
+                └── _wdms_index_/
+                    └── index.parquet
+
+
+In this case `bulk_catalog` will contains chunk path related `record_path_level_0`, similar to:
+
+chunk1-path = session/session_id_1/data/chunk1.parquet
+"""
+
+
+def _obj_to_hash_str(obj):
+    """generate a hash as string from an object. the hash is generated using SHA1 encode as base 32 but only
+    keeping the last 16 characters. Motivations are:
+       - base32: so can be used in filename or in URL without any needs of encoding, take less chars than hex
+       - last 16: to reduce the number of characters and avoid potential storage limitation. It remains valid
+           as it will be between very few items (chunks), at maximum few thousands, then the collision likelihood is
+           infinitesimal
+    """
+
+    obj_bytes = pickle.dumps(obj, 5)
+    return base64.b32encode(hashlib.sha1(obj_bytes).digest()).decode()[:-16]
+
+
+# TODO [TAG pandas dependent]
+def generate_chunk_filename(dataframe: pd.DataFrame) -> str:
+    return _generate_chunk_filename_v1(dataframe)
+
+
+# TODO [TAG pandas dependent]
+def _generate_chunk_filename_v2(dataframe: pd.DataFrame) -> str:
+    """construct a filename with extension this way: {index_hash}.{shape_hash}:
+       - index_hash takes into account the first and last index value
+       - shape_hash takes into_account all column labels and types
+       This method is idempotent
+    Raises:
+        IndexError - if empty dataframe
+    """
+    first_idx, last_idx = dataframe.index[0], dataframe.index[-1]
+    shape_h = _obj_to_hash_str((dataframe.columns.values, dataframe.dtypes.values))
+    index_h = _obj_to_hash_str((first_idx, last_idx))
+    return index_h + "." + shape_h
+
+
+# TODO [TAG pandas dependent]
+def _generate_chunk_filename_v1(dataframe: pd.DataFrame) -> str:
+    """Generate a chunk filename composed of information from the given dataframe
+    {first_index}_{last_index}_{time}.{shape}
+    The shape is a hash of columns names + columns dtypes
+    If chunks have same shape, dask can read them together.
+
+    Warnings:
+        - This funtion is NOT idempotent !
+        - Do not modify the name without updating the class SessionFileMeta !
+          Indeed, SessionFileMeta parse information from the chunk filename
+        - Filenames impacts partitions order in Dask as it order them by 'natural key'
+          Thats why the start index is in the first position
+
+    Raises:
+        IndexError - if empty dataframe
+
+    >>> _generate_chunk_filename(pd.DataFrame({'A': range(10), 'B': range(10)}, index=range(10)))
+    '0_9_1637223437910.526782c41fe12c3249046fedcc45563ef3662250'
+    >>> _generate_chunk_filename(pd.DataFrame({'A': range(10), 'B': range(10)}, index=range(10,20)))
+    '10_19_1637223490719.526782c41fe12c3249046fedcc45563ef3662250'
+    >>> _generate_chunk_filename(pd.DataFrame({'A': [1], 'B': [1]}, index=[datetime.datetime.now()]))
+    '1639672097644401000_1639672097644401000_1639668497645.526782c41fe12c3249046fedcc45563ef3662250'
+    >>> _generate_chunk_filename(pd.DataFrame({'A': []}, index=[]))
+    IndexError: index 0 is out of bounds for axis 0 with size 0
+    """
+    first_idx, last_idx = dataframe.index[0], dataframe.index[-1]
+    if isinstance(dataframe.index, pd.DatetimeIndex):
+        first_idx, last_idx = dataframe.index[0].value, dataframe.index[-1].value
+
+    shape_str = "_".join(f"{cn}:{dt}" for cn, dt in dataframe.dtypes.items())
+    shape = hashlib.sha1(shape_str.encode()).hexdigest()
+    cur_time = round(time.time() * 1000)
+    return f"{first_idx}_{last_idx}_{cur_time}.{shape}"
+
+
+index_reg = r"[+-]?\d+(\.\d*)?"  # it can be an integer or a float
+CHUNK_FILENAME_REGEX = compile(rf"^{index_reg}_{index_reg}_\d+(\.).+$")
+CHUNK_FILENAME_REGEX_V2 = compile(r"^(\w){16}(\.)(\w){16}(\.).+$")
+
+
+def is_a_chunk_file(filepath) -> bool:
+    # TODO to review, for now only to distinguish multi part/file chunk resulting of a chunk conflict resolution
+    #  and saved by Dask. It might be more efficient in main cases (no conflict) to do this only if load of chunk
+    #  failed (speed favors no conflict case). Eventually with the removal of Dask and chunk massaging, these
+    #  cases will become rarer.
+    filename = basename(filepath)
+    return CHUNK_FILENAME_REGEX_V2.match(filename) is not None or CHUNK_FILENAME_REGEX.match(filename) is not None
+
+
+def join(path, *paths) -> str:
+    # enforce usage of '/' as it remains compatible with all known usage so far: Windows 10+ or Linux fs, ffspec,
+    # real blob storage and blob storage emulator (e.g. Azurite)
+    return os_path_join(path, *paths).replace("\\", "/")
+
+
+def basename(path) -> str:
+    return os_path_basename(path)
+
+
+def record_path_level_0(record_id: str, *, base_directory: str | None = None) -> str:
+    """level 0 path for any bulk related files for a given record"""
+    encoded_id = hashlib.sha1(record_id.encode()).hexdigest()
+    if base_directory:
+        return join(base_directory, encoded_id)
+    return encoded_id
+
+
+def bulk_path_level_1(record_id: str | None, bulk_id: str, *, base_directory: str | None = None) -> str:
+    """
+    Return the base path for any files created/generated at a given bulk id.
+    if record_id is None then the path is provided related to `record_path_level_0`
+    """
+    if record_id is None:
+        return join("bulk", bulk_id, "data")
+    return join(record_path_level_0(record_id, base_directory=base_directory), "bulk", bulk_id, "data")
+
+
+def session_path_level_1(record_id: str | None, session_id: str, *, base_directory: str | None = None) -> str:
+    """
+    returns base folder for bulk files created/generated within a session.
+    if record_id is None then the path is provided related to `record_path_level_0`
+    """
+    if record_id is None:
+        return join("session", str(session_id), "data")
+    return join(record_path_level_0(record_id, base_directory=base_directory), "session", str(session_id), "data")
+
+
+def catalog_file_path(record_id: str, bulk_id: str, *, base_directory: str | None = None) -> str:
+    folder_path = bulk_path_level_1(
+        record_id, bulk_id, base_directory=base_directory
+    )  # base directory expected to be None because base_directory already inside tenant
+    return join(folder_path, "bulk_catalog.json")
+
+
+# TODO try to delete this function if possible to avoid misleading around path construction
+def record_relative_path_TO_DELETE(record_id: str, path: str, *, base_directory: str | None = None) -> str:
+    """Returns the path relative to the specified record."""
+    base_path = record_path_level_0(record_id, base_directory=base_directory)
+    return relpath(path, base_path).replace("\\", "/")

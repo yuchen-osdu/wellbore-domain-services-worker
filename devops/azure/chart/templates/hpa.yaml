@@ -1,0 +1,63 @@
+# Copyright 2023 Schlumberger
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+{{- if .Values.isAutoscalingEnabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  annotations:
+{{ include "os-wellbore-ddms-worker.commonAnnotations" . | indent 4}}
+  labels:
+{{ include "os-wellbore-ddms-worker.commonLabels" . | indent 4}}
+  name: {{ .Values.deployment.name }}{{ include "os-wellbore-ddms-worker.name-suffix" . }}
+{{ include "os-wellbore-ddms-worker.namespace" . | indent 2}}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ .Values.deployment.name }}{{ include "os-wellbore-ddms-worker.name-suffix" . }}
+  minReplicas: {{ .Values.minReplicaCount }}
+  maxReplicas: {{ .Values.maxReplicaCount }}
+  metrics:
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 50
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 150
+      policies:
+      - type: Pods
+        value: 2
+        periodSeconds: 30
+    scaleUp:
+      stabilizationWindowSeconds: 10
+      # Either add 50% of current pods or 2 pods (whichever is higher) every 10 seconds until the the HPA stabilizes
+      selectPolicy: Max
+      policies:
+      - type: Pods
+        value: 2
+        periodSeconds: 10
+      - type: Percent
+        value: 50
+        periodSeconds: 10
+{{- end }}
