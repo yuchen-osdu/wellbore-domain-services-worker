@@ -12,17 +12,17 @@
 
 default:
   image: python:3.10-slim-bullseye
+  before_script:
+    - export PIP_EXTRA_INDEX_URL=https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple
+    - pip3 install -e ".[dev]"
 
 stages:
+  - linting
   - testing
-
-before_script:
-  - export PIP_EXTRA_INDEX_URL=https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple
-  - pip3 install -e ".[dev]"
 
 linters-check:
   tags: ["osdu-small"]
-  stage: testing
+  stage: linting
   script:
     - black . --check
     - flake8 ./src
@@ -32,11 +32,32 @@ unit-tests:
   tags: ["osdu-small"]
   stage: testing
   script:
-    - pytest ./tests/unit
+    - coverage run -m pytest ./tests/unit --junitxml=report.xml
+    - coverage report
+    - coverage xml
+  coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
+  artifacts:
+    when: always
+    reports:
+      junit: report.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+
 
 service-tests:
   tags: ["osdu-small"]
   stage: testing
   script:
-    - pytest ./tests/service
+    - coverage run -m pytest ./tests/service --junitxml=report.xml
+    - coverage report
+    - coverage xml
+  coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
+  artifacts:
+    when: always
+    reports:
+      junit: report.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
 
