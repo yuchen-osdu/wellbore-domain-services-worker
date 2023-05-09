@@ -14,10 +14,13 @@
 
 import asyncio
 from io import BytesIO
+import uuid
 
 # TODO [TAG pandas dependent]
 import pandas as pd
 from natsort import natsorted
+import pyarrow.parquet as pq
+import pyarrow as pa
 
 from osdu.core.api.storage.blob_storage_base import BlobStorageBase
 
@@ -39,6 +42,7 @@ from wdmsworker.bulk.read_errors import (
     TooManyValuesRequested,
     ReadBulkInvalidParameter,
     BulkCurvesNotFound,
+    ReadBulkCaseNotSupportedException,
 )
 from wdmsworker.bulk.reader import (
     read_bulk,
@@ -325,6 +329,45 @@ async def test_single_chunk_case(bulk_storage_mock: BlobStorageBase, test_tenant
 
 @pytest.mark.anyio
 @pytest.mark.parametrize(["accept_type", "orient"], format_params)
+@pytest.mark.parametrize("columns", [["A", "B", "C"], [0, 1, 3], [0.0, 1.1, 7.1]])
+async def test_v0_storage_case(
+    bulk_storage_mock: BlobStorageBase, test_tenant, accept_type: MimeType, orient: JSONOrient | None, columns
+):
+    # GIVEN single chunk stored
+    reference_df = generate_df(columns, index=range(6))
+    bulk_id = await store_with_v0_storage(bulk_storage_mock, test_tenant, reference_df)
+
+    response = await read_bulk_outside_session(
+        bulk_storage_mock, test_tenant, "record_id", bulk_id, accept_type, orient
+    )
+    assert_dataframe_from_content(reference_df, response.content, accept_type, orient)
+
+    response = await read_bulk_outside_session(
+        bulk_storage_mock, test_tenant, "record_id", bulk_id, accept_type, orient, curves_selection=columns[1:]
+    )
+    assert_dataframe_from_content(reference_df[columns[1:]], response.content, accept_type, orient)
+
+    response = await read_bulk_outside_session(
+        bulk_storage_mock,
+        test_tenant,
+        "record_id",
+        bulk_id,
+        accept_type,
+        orient,
+        curves_selection=columns[1:],
+        offset=1,
+        limit=2,
+    )
+    assert_dataframe_from_content(reference_df[columns[1:]].iloc[1:3], response.content, accept_type, orient)
+
+    response = await read_bulk_outside_session(
+        bulk_storage_mock, test_tenant, "record_id", bulk_id, accept_type, orient, offset=1, limit=2
+    )
+    assert_dataframe_from_content(reference_df.iloc[1:3], response.content, accept_type, orient)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(["accept_type", "orient"], format_params)
 async def test_single_chunk_case_filtering(bulk_storage_mock: BlobStorageBase, test_tenant, accept_type, orient):
     # GIVEN single chunk stored
     reference_df = generate_df(["A", "B", "C"], index=range(200))
@@ -431,6 +474,59 @@ async def test_read_bulk_without_session(
         "describe": describe,
     }
     await assert_read_multicases(assert_read_bulk_without_session, reference_df, **common_kwargs)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("describe", describe_params)
+@pytest.mark.parametrize(["accept_type", "orient"], format_params)
+async def test_read_bulk_old_dask_storage(
+    bulk_storage_mock: BlobStorageBase, test_tenant, describe, accept_type, orient: JSONOrient
+):
+    # simulate an old bulk storage M8, no catalog and chunks merged and written with dask so some metadata files
+    # beside a parquet file
+    reference_df = generate_df(["A", "B", "C", "D", "E"], index=range(50))
+    record_id = "rid"
+    bulk_id = "bid"
+
+    bulk_base_path = storage_path_builder.bulk_path_level_1(record_id, bulk_id, base_directory=None)
+    await bulk_storage_mock.upload(
+        test_tenant, join(bulk_base_path, "_common_metadata"), BytesIO(b"fake common metadata")
+    )
+    await bulk_storage_mock.upload(test_tenant, join(bulk_base_path, "_metadata"), BytesIO(b"fake metadata"))
+    await bulk_storage_mock.upload(
+        test_tenant, join(bulk_base_path, "part.0.parquet"), reference_df.to_parquet(None, index=True)
+    )
+
+    common_kwargs = {
+        "storage": bulk_storage_mock,
+        "tenant": test_tenant,
+        "record_id": record_id,
+        "bulk_id": bulk_id,
+        "accept_type": accept_type,
+        "orient": orient,
+        "describe": describe,
+    }
+    await assert_read_multicases(assert_read_bulk_without_session, reference_df, **common_kwargs)
+
+
+@pytest.mark.anyio
+async def test_read_bulk_old_dask_storage_unsupported_case(bulk_storage_mock: BlobStorageBase, test_tenant):
+    # simulate an old bulk storage M8, no catalog and chunks merged and written with dask so some metadata files
+    # beside a parquet file
+    # old Dask storage multi partition is not supported
+    record_id = "rid"
+    bulk_id = "bid"
+
+    bulk_base_path = storage_path_builder.bulk_path_level_1(record_id, bulk_id, base_directory=None)
+    await bulk_storage_mock.upload(
+        test_tenant, join(bulk_base_path, "_common_metadata"), BytesIO(b"fake common metadata")
+    )
+    await bulk_storage_mock.upload(test_tenant, join(bulk_base_path, "_metadata"), BytesIO(b"fake metadata"))
+    await bulk_storage_mock.upload(test_tenant, join(bulk_base_path, "part.0.parquet"), BytesIO(b"part0"))
+    await bulk_storage_mock.upload(test_tenant, join(bulk_base_path, "part.1.parquet"), BytesIO(b"part1"))
+
+    with pytest.raises(ReadBulkCaseNotSupportedException):
+        await read_bulk_outside_session(bulk_storage_mock, test_tenant, record_id, bulk_id, MimeTypes.PARQUET, None)
 
 
 @pytest.mark.anyio
@@ -790,6 +886,30 @@ async def store_chunks(
 
         catalog.add_chunk(ChunkGroup(columns, chunk_paths, []))
     return catalog
+
+
+async def store_with_v0_storage(
+    storage: BlobStorageBase,
+    tenant,
+    df,
+    *,
+    bulk_id=None,
+) -> str:
+    bulk_id = bulk_id or str(uuid.uuid4())
+
+    # way how V0 export to parquet
+    buffer = BytesIO()
+    pq.write_table(
+        pa.Table.from_pandas(df, preserve_index=True),
+        buffer,
+        version="2.6",
+        compression="snappy",
+    )
+
+    buffer.seek(0)
+    content = buffer.read()
+    await storage.upload(tenant, bulk_id, content)
+    return bulk_id
 
 
 async def assert_read_bulk_without_session(

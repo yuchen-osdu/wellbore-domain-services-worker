@@ -21,7 +21,7 @@ from .blob_storage_fsspec import BlobStorageFsspec
 from ...constants import SERVICE_INTERNAL_NAME
 
 
-def initialize_for_local(app):
+def initialize_provider(app):
     local_folder = environ.get("USE_LOCALFS_BLOB_STORAGE_WITH_PATH")
 
     assert local_folder

@@ -26,6 +26,8 @@ from natsort import natsorted
 # TODO [TAG pandas dependent]
 import pandas as pd
 import numpy as np
+import pyarrow.parquet as pq
+from pyarrow import Table
 
 from ..model.json_orient import JSONOrient
 from ..model.mime_types import MimeType, MimeTypes
@@ -37,6 +39,7 @@ from ..model.describe import (
     ValuesOrderAscending,
     ValuesOrderDescending,
 )
+from ..logger import get_logger
 
 re_column_array = re.compile(r"^(?P<name>.+)\[(?P<start>[^:]+):?(?P<stop>.*)\]$")
 
@@ -239,14 +242,38 @@ def load_df(file_like_data, content_type: MimeType) -> pd.DataFrame:
 
 
 # TODO [TAG pandas dependent]
-def dump_df(df: pd.DataFrame, content_type: MimeType, orient: JSONOrient | None = None) -> bytes:
+def dump_df(df: pd.DataFrame, content_type: MimeType, orient: JSONOrient | None = None) -> bytes | str:
     if content_type == MimeTypes.PARQUET:
-        return df.to_parquet(None, index=True, engine="pyarrow")
+        try:
+            return df.to_parquet(None, index=True, engine="pyarrow")
+        except ValueError as e:
+            # possible for V0 storage case when column values are not string, so let's use direct serialisation
+            columns_type = df.columns.inferred_type
+            get_logger().error(f"dataframe to parquet error: {e}, columns inferred type = {columns_type}, trying v0")
+            if columns_type == "string":
+                # if columns are string it's a different error so immediately raise
+                raise ValueError("invalid data format") from e
+            return to_parquet_v0(df)
 
     if content_type == MimeTypes.JSON:
-        return df.fillna("NaN").to_json(orient=(orient or JSONOrient.Split).value).encode()
+        return df.fillna("NaN").to_json(orient=(orient or JSONOrient.Split).value, index=True, date_format="iso")
 
     raise ValueError(f"unsupported content_type {content_type}")
+
+
+# TODO [TAG pandas dependent]
+def to_parquet_v0(df: pd.DataFrame) -> bytes:
+    # wdms v0 to parquet way, unlike pandas.to_parquet it allows columns values to be numerical. To be used only for
+    # backward compatibility reasons
+    buffer = BytesIO()
+    pq.write_table(
+        Table.from_pandas(df, preserve_index=True),
+        buffer,
+        version="2.6",
+        compression="snappy",
+    )
+    buffer.seek(0)
+    return buffer.read()
 
 
 # TODO [TAG pandas dependent]

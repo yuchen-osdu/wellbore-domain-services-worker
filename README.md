@@ -37,13 +37,33 @@ Update dependencies:
 
 
 ## Cloud provider code specific
+
+### Code
 Each provider needs to add its own implementation of:
-- storage access
-- _(optional)_  logging message export 
+- blob storage
+- tenant resolution function from data partition id
+- _(optional)_  logging message export and any other specific initialization.
 
-Dedicated cloud provider code can be put under folder `src/wdmsworker/provider`.  
-The code hook is done in `app.py` module in the `on_startup_event()` method of the FastAPI app.  
+Dedicated cloud provider code can be put under folder [wdmsworker/provider](./src/wdmsworker/provider).  
+The code hook is done at the startup event of the FastAPI app and the switch is done inside function 
+[`initialize_provider`](./src/wdmsworker/provider/__init__.py) based on the value of the environment variable
+`CLOUD_PROVIDER`.  
 
+see [implementation for Azure](./src/wdmsworker/provider/azure/__init__.py).
+
+### Dependencies
+Provider specific dependencies are expected to be listed as optional inside [pyproject.toml (line 59)](./pyproject.toml).  
+Installation for a specific provider is then done this way:
+
+````
+pip install .[provider]
+````
+
+specifying extra index url directly in pip install command:
+
+````
+pip install .[provider] --extra-index-url https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple
+````
 
 ## Run tests
 

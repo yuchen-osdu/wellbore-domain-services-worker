@@ -32,6 +32,10 @@ replicaCount: 2
 # Undefined by default, but you can specify it if needed
 # nodepool: services
 
+node_selector_labels:
+  - kubernetes.azure.com/agentpool
+  - agentpool
+
 resources:
  limits:
    memory: 2Gi
@@ -39,6 +43,15 @@ resources:
  requests:
    memory: 256Mi
    cpu: 1
+
+kedaconfig:
+ servicepath: "/api/os-wellbore-ddms" #monitor ddms end points
+ duration: "5m"
+ thresholdcoefficient: "0.8"
+ threshold: "50"
+ metricType: "Utilization"
+ utilization:
+    cpu: 70
 
 probes:
   startup:

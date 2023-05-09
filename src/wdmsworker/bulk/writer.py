@@ -35,8 +35,6 @@ from . import write_errors as exc
 from ..logger import get_logger
 from ..capture_timings import capture_timings
 
-logger = get_logger()
-
 
 async def write_bulk_data_in_session(
     storage: BlobStorageBase, tenant, content: bytes, content_type: MimeType, record_id: str, session_id: str
@@ -80,7 +78,7 @@ async def write_bulk_data_in_session(
             storage.upload(tenant, chunk_filepath + ".parquet", content),
         )
     except Exception as e:
-        logger.exception(f"Exception occurred while uploading to blob storage for record {record_id}: {e}")
+        get_logger().exception(f"Exception occurred while uploading to blob storage for record {record_id}: {e}")
         raise exc.BulkUploadFailure("Failed to store bulk and its metadata") from e
 
     return basic_describe(df)
@@ -109,7 +107,7 @@ async def write_bulk(
 
     # 1- deserialize the dataframe
     try:
-        df = load_df(BytesIO(content), content_type)
+        df = load_df(content, content_type)
     except Exception as e:
         raise exc.BulkUnprocessable() from e
 
@@ -151,7 +149,7 @@ async def write_bulk(
             storage.upload(tenant, full_file_path, content),
         )
     except Exception as e:
-        logger.exception(f"Exception occurred while uploading to blob storage for record {record_id}: {e}")
+        get_logger().exception(f"Exception occurred while uploading to blob storage for record {record_id}: {e}")
         raise exc.BulkUploadFailure("Failed to store bulk and its metadata") from e
 
     return bulk_id, basic_describe(df), ref_describe
