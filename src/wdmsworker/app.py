@@ -59,6 +59,10 @@ async def on_startup_event():
         from .provider import azure
 
         azure.initialize_for_azure(app)
+    elif provider == constants.CLOUD_PROVIDER_AWS:
+        from .provider import aws
+    
+        aws.initialize_for_aws(app)
     elif provider == "local":
         from .provider import local
 
