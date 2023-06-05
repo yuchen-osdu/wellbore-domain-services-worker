@@ -29,9 +29,6 @@ from ..logger import get_logger
 from . import reader
 from . import read_errors
 
-
-logger = get_logger()
-
 read_bulk_router = APIRouter()
 
 
@@ -55,7 +52,7 @@ async def get_bulk_route(
     try:
         catalog = await async_load_bulk_catalog_with_blob_storage(storage, tenant, record_id, bulk_id)
     except Exception as e:
-        logger.exception(f"unexpected error while loading catalog for {record_id}, bulk_id {bulk_id}: {e}")
+        get_logger().exception(f"unexpected error while loading catalog for {record_id}, bulk_id {bulk_id}: {e}")
         raise HTTPException(500, f"unexpected failure while loading catalog for {record_id}, bulk_id {bulk_id}: {e}")
 
     curve_selection: List[str] | None = None

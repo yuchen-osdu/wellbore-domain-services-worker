@@ -20,19 +20,19 @@ from itertools import repeat, chain
 
 # TODO [TAG pandas dependent]
 import pandas as pd
+
 from natsort import natsorted
 from osdu.core.api.storage.blob_storage_base import BlobStorageBase
 
 from .filtering import ValueFilters, apply_bulk_filters
 from .read_errors import FilteringError
-from wdmsworker.model.filtering_model import BulkFilters, IndexFilters
+from ..model.filtering_model import BulkFilters, IndexFilters
 from ..logger import get_logger
-from ..capture_timings import timeit
+from ..capture_timings import timeit, capture_timings
 from ..model.json_orient import JSONOrient
 from ..model.mime_types import MimeType, MimeTypes
 from . import read_errors
 from . import constants
-from ..capture_timings import capture_timings
 
 from .catalog import BulkCatalog
 from . import storage_path_builder
@@ -45,6 +45,7 @@ from .dataframe import (
     expand_columns,
     filter_by_index,
     get_row_count_and_columns,
+    dump_df,
 )
 
 
@@ -78,7 +79,11 @@ def _dataframe_filters_and_reorder_columns(
         any_curve_array = bulk_read_filters.curves_are_array
         if any_curve_array is None:
             # at this stage, if value is not set then compute it from df columns
-            any_curve_array = any(re_column_array.match(c) for c in final_df.columns.tolist())
+            try:
+                any_curve_array = any(re_column_array.match(c) for c in final_df.columns.tolist())
+            except TypeError:
+                # likely due to old V0 storage using non string in column, do not re-order
+                get_logger().error(f"dataframe with invalid column type, found {final_df.columns.dtype}")
 
         if any_curve_array:
             # trigger natural sorting only if columns has arrays curves
@@ -111,7 +116,18 @@ async def read_bulk_outside_session(
 
     # failure cases
     if len(chunk_paths) > 1:
-        raise read_errors.ReadBulkNotProcessable("multiple chunks without catalog")
+        # it could be a case of the very first storage version, all chunk were merged without producing catalog.
+        # so last chance before error. Still only supports single parquet so might not cover all cases.
+        # filter out no-parquet files (meta data files of Dask), if a single parquet file left, let's continue
+        # otherwise raise a not supported case error.
+        chunk_paths = [chunk_path for chunk_path in chunk_paths if chunk_path.endswith(".parquet")]
+        if len(chunk_paths) != 1:
+            # several parquet chunks without catalog, not supported
+            get_logger().warning(
+                f"cannot process {record_id} bulk_id {bulk_id}, multiple parquet files found without catalog,"
+                f" {len(chunk_paths)} partitions found"
+            )
+            raise read_errors.ReadBulkCaseNotSupportedException("multiple chunks without catalog")
 
     if len(chunk_paths) == 0:
         # last chance, it could be bulk stored with the very first storage, so direct single parquet file, no extension
@@ -350,37 +366,17 @@ def _validate_parameters(
 
 
 # TODO [TAG pandas dependent]
-# TODO [TAG synchronous CPU bound operation]
-def _build_response_to_parquet(df: pd.DataFrame) -> ReadResult:
-    with timeit(f"to parquet dataframe of shape {df.shape}"):
-        content = df.to_parquet(None, index=True, engine="pyarrow")
-    return ReadResult(content, MimeTypes.PARQUET)
-
-
-# TODO [TAG pandas dependent]
-# TODO [TAG synchronous CPU bound operation]
-def _build_response_to_json(df: pd.DataFrame, orient: JSONOrient) -> ReadResult:
-    with timeit(f"to json dataframe of shape {df.shape}"):
-        content = df.fillna("NaN").to_json(orient=orient.value, index=True, date_format="iso")
-
-    return ReadResult(content, MimeTypes.JSON)
-
-
-# TODO [TAG pandas dependent]
 # @capture_timings('_build_response_from_df')
 async def _build_response_from_df(df: pd.DataFrame, accept_type: MimeType, orient: JSONOrient | None) -> ReadResult:
     """serialize the dataframe into parquet and construct the http response"""
 
     df.index.name = None  # similar to 'df_render'
-    if accept_type == MimeTypes.PARQUET:
-        return _build_response_to_parquet(df)
-
-    if accept_type == MimeTypes.JSON:
-        if orient is None:
-            raise RuntimeError()
-        return _build_response_to_json(df, orient)
-
-    raise RuntimeError(f"unsupported format {accept_type}")
+    with timeit(f"dataframe of shape {df.shape} to {accept_type}"):
+        try:
+            content = dump_df(df, accept_type, orient)
+            return ReadResult(content, accept_type)
+        except ValueError as e:
+            raise read_errors.ReadBulkNotProcessable() from e
 
 
 async def _load_single_dataframe_from_storage(storage: BlobStorageBase, tenant, obj_path: str, columns_to_load=None):
@@ -388,9 +384,11 @@ async def _load_single_dataframe_from_storage(storage: BlobStorageBase, tenant, 
     limit are provided"""
     # limit the concurrency to not overwhelm the service
     async with LOAD_DATAFRAME_SEMAPHORE:
-        content = await storage.download(tenant, obj_path)
-        content = BytesIO(content)
-        return pd.read_parquet(content, columns=columns_to_load)
+        with timeit("download dataframe from storage"):
+            content = await storage.download(tenant, obj_path)
+        with timeit("loading parquet from dataframe"):
+            content = BytesIO(content)
+            return pd.read_parquet(content, columns=columns_to_load)
 
 
 async def _expand_chunk_paths(

@@ -20,7 +20,7 @@ COPY LICENSE ./
 COPY ./src/wdmsworker ./src/wdmsworker
 
 ENV PIP_EXTRA_INDEX_URL=https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple
-RUN pip install -v .
+RUN pip install -v .[az]  #  currently Azure specific
 RUN rm -rf ./src/wdmsworker  # must use multi layer instead ?
 
 EXPOSE 8080

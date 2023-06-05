@@ -18,11 +18,9 @@ from .constants import SERVICE_INTERNAL_NAME
 from fastapi import Request
 from . import constants
 
-wdms_logger = logging.getLogger(SERVICE_INTERNAL_NAME)
-
 
 def get_logger():
-    return wdms_logger
+    return logging.getLogger(SERVICE_INTERNAL_NAME)
 
 
 class RequestContextAdapter(logging.LoggerAdapter):
@@ -47,26 +45,4 @@ def get_logger_from_request(request: Request):
         request_context.setdefault("data-partition-id", request.headers[constants.PARTITION_ID_HEADER_NAME])
 
     extra = {"request_context": request_context}
-    return RequestContextAdapter(wdms_logger, extra=extra)
-
-
-def set_logger(logger):
-    global wdms_logger
-    wdms_logger = logger
-
-
-def attach_logging_middleware_to_app(fastapi_app):
-    """
-    Adds a http middleware to given fastApi app object to log unexpected Python exceptions occurring when processing
-    incoming requests. Log entries can be enriched with headers if provided: "correlation-id", "request-id" and
-    "data-partition-id".
-    """
-
-    @fastapi_app.middleware("http")
-    async def logging_exception_middleware(request: Request, call_next):
-        log = get_logger_from_request(request)
-        try:
-            return await call_next(request)
-        except Exception:
-            log.exception(f"Exception occurred when calling: '{request.url.path}'")
-            raise
+    return RequestContextAdapter(get_logger(), extra=extra)

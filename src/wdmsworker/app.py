@@ -14,14 +14,19 @@
 
 from os import environ
 from logging import getLogger
-from fastapi import FastAPI
+
+from fastapi import FastAPI, Request
+from starlette.middleware.base import BaseHTTPMiddleware
+
 from . import get_version
 from . import constants
+from .provider import initialize_for_provider
 from .bulk.write_router import write_bulk_router
 from .bulk.read_router import read_bulk_router
-from fastapi import Request
-
-from .logger import attach_logging_middleware_to_app
+from .http_middlewares import (
+    logging_exception_middleware,
+    tracing_middleware,
+)
 
 open_api_prefix = environ.get(constants.OPENAPI_PREFIX_ENV_VAR, constants.API_PREFIX)
 
@@ -33,11 +38,9 @@ app = FastAPI(
 
 base = FastAPI()
 base.mount(open_api_prefix, app)
-logger = getLogger(constants.SERVICE_INTERNAL_NAME)
-app.state.logger = logger
 
-
-attach_logging_middleware_to_app(app)
+app.add_middleware(BaseHTTPMiddleware, dispatch=logging_exception_middleware)
+app.add_middleware(BaseHTTPMiddleware, dispatch=tracing_middleware)
 
 
 @base.on_event("startup")
@@ -55,17 +58,10 @@ async def on_startup_event():
     """
 
     provider = environ.get(constants.CLOUD_PROVIDER_ENV_VAR, "local")
-    if provider == constants.CLOUD_PROVIDER_AZURE:
-        from .provider import azure
+    initialize_for_provider(provider, app)
 
-        azure.initialize_for_azure(app)
-    elif provider == "local":
-        from .provider import local
-
-        local.initialize_for_local(app)
-    else:
-        raise RuntimeError(f"provider {provider} not supported")
-
+    logger = getLogger(constants.SERVICE_INTERNAL_NAME)
+    app.state.logger = logger
     logger.info(f"startup DONE for provider {provider}")
 
 
@@ -76,7 +72,7 @@ async def base_on_shutdown_event():
 
 @app.on_event("shutdown")
 async def on_shutdown_event():
-    logger.info("shutdown DONE")
+    app.state.logger.info("shutdown DONE")
 
 
 # ---------------------------------------------------------------

@@ -11,11 +11,15 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import io
 
 import pytest
 
 # TODO [TAG pandas dependent]
 import pandas as pd
+
+from wdmsworker.model.json_orient import JSONOrient
+from ..generate_data import generate_df
 from wdmsworker.model.mime_types import MimeTypes
 from wdmsworker.bulk.dataframe import (
     group_curve_columns,
@@ -29,9 +33,34 @@ from wdmsworker.bulk.dataframe import (
     basic_describe,
     column_describe,
     get_row_count_and_columns,
+    dump_df,
 )
 
 from wdmsworker.model.describe import DataframeBasicDescribe, ColumnBasicDescribe, ColumnExtendedDescribe
+
+
+@pytest.mark.parametrize("columns", [["A", "B", "C"], [0, 1, 3], [0.0, 1.1, 7.1]])
+def test_dump_parquet(columns):
+    ref_df = generate_df(columns, range(10))
+    content = io.BytesIO(dump_df(ref_df, MimeTypes.PARQUET))
+    actual_df = pd.read_parquet(content)
+    pd.testing.assert_frame_equal(ref_df, actual_df)
+
+
+@pytest.mark.parametrize("columns", [["A", "B", "C"], [0, 1, 3], [0.0, 1.1, 7.1]])
+def test_dump_json(columns):
+    ref_df = generate_df(columns, range(10))
+    # force dtype as int64, as generate_df may generate int32 data but will infer int64 for json
+    for c in columns:
+        ref_df[c] = ref_df[c].astype("int64")
+    content = io.StringIO(dump_df(ref_df, MimeTypes.JSON))
+    actual_df = pd.read_json(content, orient=JSONOrient.Split)
+    pd.testing.assert_frame_equal(ref_df, actual_df)
+
+
+def test_dump_invalid():
+    with pytest.raises(ValueError):
+        dump_df(generate_df([0], [0]), "invalid_mime")
 
 
 @pytest.mark.parametrize(

@@ -16,6 +16,7 @@ import logging
 import sys
 from os import environ
 
+from opencensus.log import TraceLogger
 from opencensus.trace import config_integration
 from opencensus.ext.azure.log_exporter import AzureLogHandler
 
@@ -87,10 +88,13 @@ def create_azure_logger(*, service_name, az_ai_instrumentation_key, az_logger_le
 
      returns logger configured wrapped into ContextLoggerAdapter
     """
+
+    # Ensure exceptions will be attached to opencensus requests in AppInsights by modifying wdms logger meta class
     config_integration.trace_integrations(["logging"])
 
     # stdout handler for direct logging output to stdout.
     stdout_handler = logging.StreamHandler(sys.stdout)
+    stdout_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
 
     #  AzurelogHandler for logging to azure AppInsights
     key = az_ai_instrumentation_key
@@ -112,16 +116,22 @@ def create_azure_logger(*, service_name, az_ai_instrumentation_key, az_logger_le
     # Acquire the logger for osdu-core-lib-python-azure
     _set_logger_handlers(
         logger_name="osdu_az",
-        log_level=logging.INFO,
+        log_level=logging.WARNING,
         handlers=[stdout_handler, az_handler],
     )
 
     # Acquire the logger for wdms-worker
     logger = _set_logger_handlers(
         logger_name=SERVICE_INTERNAL_NAME,
-        log_level=logging.DEBUG,
+        log_level=logging.INFO,
         handlers=[stdout_handler, az_handler],
     )
+
+    if az_handler:
+        assert isinstance(logger, TraceLogger), (
+            f"Logger '{SERVICE_INTERNAL_NAME}' has been created before this line, link between requests and exceptions "
+            "won't work properly"
+        )
 
     return AzureContextLoggerAdapter(logger, extra=dict())
 
