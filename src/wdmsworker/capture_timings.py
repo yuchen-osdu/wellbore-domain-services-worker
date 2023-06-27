@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from logging import INFO
+from typing import Final
+from logging import INFO, DEBUG
 from functools import wraps, partial
 import asyncio
 from time import perf_counter, process_time
@@ -20,12 +21,15 @@ from contextlib import contextmanager
 
 from .logger import get_logger
 
+LOG_TIMING_THRESHOLD: Final[float] = 1  # threshold for switching log level
 
-def log_timings(tag, wall, cpu, level=INFO):
+
+def log_timings(tag, wall, cpu, threshold=LOG_TIMING_THRESHOLD):
+    level = INFO if cpu > threshold or wall > threshold else DEBUG
     get_logger().log(level, f"Timings of {tag}, wall={wall:.5f}s, cpu={cpu:.5f}s")
 
 
-default_capture_timing_handlers = [partial(log_timings, level=INFO)]
+default_capture_timing_handlers = [partial(log_timings)]
 
 
 def capture_timings(tag, handlers=None):
@@ -68,7 +72,7 @@ def capture_timings(tag, handlers=None):
 
 
 @contextmanager
-def timeit(tag: str, level=INFO):
+def timeit(tag: str, threshold=LOG_TIMING_THRESHOLD):
     """
     log timings of a block. Must used with context manager:
 
@@ -82,4 +86,4 @@ def timeit(tag: str, level=INFO):
 
     wall = perf_counter() - start_perf
     cpu = process_time() - start_process
-    log_timings(tag, wall, cpu, level)
+    log_timings(tag, wall, cpu, threshold)

@@ -14,14 +14,10 @@
 
 # environment variables names
 CLOUD_PROVIDER_ENV_VAR = "CLOUD_PROVIDER"
-AZ_LOGGER_LEVEL_ENV_VAR = "AZ_LOGGER_LEVEL"
 OPENAPI_PREFIX_ENV_VAR = "OPENAPI_PREFIX"
 
-#
+SERVICE_NAME = "os-wellbore-ddms-worker"
 
-CLOUD_PROVIDER_AZURE = "az"
-CLOUD_PROVIDER_AWS = "aws"
-CLOUD_PROVIDER_LOCAL = "local"
 SERVICE_INTERNAL_NAME = "wdmsworker"
 API_PREFIX = "/api/wdms-worker"
 

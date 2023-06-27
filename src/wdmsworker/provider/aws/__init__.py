@@ -13,10 +13,11 @@
 # limitations under the License.
 
 from osdu_aws.storage.storage_aws import AwsStorage
+from osdu.core.api.storage.tenant import Tenant
 from . import constants
 from os import environ
 
-def initialize_for_aws(app):
+def initialize_provider(app):
     aws_region = environ.get(constants.AWS_REGION, "us-east-1")
     aws_instance = environ.get(constants.OSDU_INSTANCE_NAME, "main")
 
@@ -24,3 +25,4 @@ def initialize_for_aws(app):
         session=None,
         service_account_file=f'{aws_region}$${aws_instance}'
     )
+    app.state.get_tenant = lambda dp: Tenant(data_partition_id=dp, project_id="", bucket_name="wdms-osdu")

@@ -27,11 +27,6 @@ dependencies = [
     "opencensus",
 
     "osdu-core-lib-python==3.0.0",
-
-    #TODO see if possible to use optional-dependencies [azure]
-    "opencensus-ext-azure",
-    "osdu-core-lib-python-azure==3.0.3",
-    "osdu-core-lib-python-aws==2.0.8",
 ]
 
 [project.urls]
@@ -45,6 +40,7 @@ test = [
     "pytest-xdist",
     "requests",  # based http client for the service tests
     "httpx",  # used by FastAPI/starlette TestClient
+    "fsspec",  # local blob storage
 ]
 dev = [
     "wdmsworker[test]",  # dependencies for tests
@@ -59,6 +55,29 @@ pkg = [
     "setuptools",
     "wheel",
     "build"
+]
+
+# cloud provider specific dependencies
+az = [
+    "opencensus-ext-azure",
+    "osdu-core-lib-python-azure==3.0.3",
+    "opencensus-ext-logging",
+]
+
+aws = [
+    "osdu-core-lib-python-aws==2.0.8",
+]
+
+ibm = [
+    # TODO: add dependencies specific to ibm
+]
+
+gc = [
+    # TODO: add dependencies specific to gc
+]
+
+anthos = [
+    # TODO: add dependencies specific to anthos
 ]
 
 [tool.pytest.ini_options]

@@ -24,8 +24,6 @@ from . import write_errors as exc
 from ..logger import get_logger
 
 
-logger = get_logger()
-
 write_bulk_router = APIRouter()
 
 
@@ -56,7 +54,7 @@ async def post_bulk_chunk_in_session_route(
             storage, tenant, await request.body(), content_type, record_id, session_id
         )
     except exc.BulkValidationError as e:
-        logger.exception(f"validation error on write bulk for record {record_id}: {e}")
+        get_logger().exception(f"validation error on write bulk for record {record_id}: {e}")
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
 
 
@@ -74,13 +72,13 @@ async def post_bulk_data_route(
             storage, tenant, await request.body(), content_type, record_id, reference
         )
     except exc.BulkUnprocessable as e:
-        logger.error(f"error in post_bulk_data_route: {e}")
+        get_logger().error(f"error in post_bulk_data_route: {e}")
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
     except exc.BulkValidationError as e:
-        logger.error(f"Validation failure in post_bulk_data_route: {e}")
+        get_logger().error(f"Validation failure in post_bulk_data_route: {e}")
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
     except exc.BulkUploadFailure as e:
-        logger.exception(f"exception at upload data to blob storage {e}")
+        get_logger().exception(f"exception at upload data to blob storage {e}")
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     return WriteBulkResponse.construct(bulkid=bulk_id, describe=bulk_description, reference=ref_description)
