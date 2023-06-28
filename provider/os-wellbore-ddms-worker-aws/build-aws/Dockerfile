@@ -21,7 +21,7 @@ COPY LICENSE ./
 COPY ./src/wdmsworker ./src/wdmsworker
 
 ENV PIP_EXTRA_INDEX_URL="https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple https://community.opengroup.org/api/v4/projects/148/packages/pypi/simple"
-RUN pip install -v .
+RUN pip install -v .[aws]
 
 COPY provider/os-wellbore-ddms-worker-aws/build-aws/entrypoint.sh .
 COPY provider/os-wellbore-ddms-worker-aws/build-aws/osdu_api.ini .

@@ -25,4 +25,4 @@ def initialize_provider(app):
         session=None,
         service_account_file=f'{aws_region}$${aws_instance}'
     )
-    app.state.get_tenant = lambda dp: Tenant(data_partition_id=dp, project_id="", bucket_name="wdms-osdu")
+    app.state.get_tenant = lambda dp: Tenant(data_partition_id=dp, project_id="", bucket_name=f'{dp}-logstore-osdu' )
