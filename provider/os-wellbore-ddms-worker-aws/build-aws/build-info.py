@@ -24,23 +24,22 @@ parser = argparse.ArgumentParser(description="")
 parser.add_argument("--branch", type=str, help="")
 
 # env - CODEBUILD_RESOLVED_SOURCE_VERSION
-parser.add_argument("--commit", type=str,  help="")
+parser.add_argument("--commit", type=str, help="")
 
 # env - CODEBUILD_BUILD_ID
-parser.add_argument("--buildid", type=str,  help="")
+parser.add_argument("--buildid", type=str, help="")
 
 # env - CODEBUILD_BUILD_NUMBER
-parser.add_argument("--buildnumber", type=str,  help="")
+parser.add_argument("--buildnumber", type=str, help="")
 
 # Get from directory name
-parser.add_argument("--reponame", type=str,  help="")
+parser.add_argument("--reponame", type=str, help="")
 
 # env OUTPUT_DIR
-parser.add_argument("--outdir", type=str,  help="")
+parser.add_argument("--outdir", type=str, help="")
 
 # full ecr image and tag, and any other artifacts
 parser.add_argument("--artifact", type=str, action="append", help="")
-
 
 
 args = parser.parse_args()
@@ -57,14 +56,9 @@ buildInfoFilePath = os.path.join(".", outputDir, "build-info.json")
 
 print(buildInfoFilePath)
 
-commitArgs = {
-    "repositoryName": repoName,
-    "commitId": commitId
-}
+commitArgs = {"repositoryName": repoName, "commitId": commitId}
 
-commitDetail = {
-    "commit": ""
-}
+commitDetail = {"commit": ""}
 
 # get the commit detail
 try:
@@ -79,7 +73,7 @@ buildInfo = {
     "build-number": buildNumber,
     "repo": repoName,
     "artifacts": artifacts,
-    "commit": commitDetail["commit"]
+    "commit": commitDetail["commit"],
 }
 print(json.dumps(buildInfo, sort_keys=True, indent=4))
 
