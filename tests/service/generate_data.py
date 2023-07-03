@@ -38,6 +38,11 @@ def generate_df(columns, index):
 
 
 def assert_frame_equal(left, right, check_column_order=True):
+    # TODO temporary: due to Dask compatibility until write fully moved to workers, index name might be different
+    #  so reset the name
+    left.index.name = None
+    right.index.name = None
+
     if not check_column_order:
         l_columns = left.columns.tolist()
         assert set(l_columns) == set(right.columns)

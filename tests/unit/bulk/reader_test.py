@@ -68,7 +68,11 @@ def assert_dataframe_from_content(expected_df, content, accept_type, orient):
         actual_df = pd.read_parquet(BytesIO(content))
     else:
         actual_df = pd.read_json(content, orient=orient.value)
-    assert_frame_equal(expected_df, actual_df, check_dtype=accept_type == MimeTypes.PARQUET)
+    if expected_df.empty and actual_df.empty:
+        # corner case, when there's no row, just checking columns
+        assert list(expected_df.columns) == list(actual_df.columns)
+    else:
+        assert_frame_equal(expected_df, actual_df, check_dtype=accept_type == MimeTypes.PARQUET)
     # check_dtype to False as json may lose strict type
 
 
@@ -484,7 +488,7 @@ async def test_read_bulk_old_dask_storage(
 ):
     # simulate an old bulk storage M8, no catalog and chunks merged and written with dask so some metadata files
     # beside a parquet file
-    reference_df = generate_df(["A", "B", "C", "D", "E"], index=range(50))
+    reference_df = generate_df(["A", "B", "C", "D", "E", "F[0]", "F[1]"], index=range(50))
     record_id = "rid"
     bulk_id = "bid"
 
@@ -813,7 +817,7 @@ def fake_chunk_name(suffix):
 
 
 def split_bulk_into_chunk(method: str):
-    reference_df = generate_df(["A", "B", "C", "D", "E"], index=range(50))
+    reference_df = generate_df(["A", "B", "C", "D", "E", "F[0]", "F[1]"], index=range(50))
     if method == "horizontal_and_vertical_split":
         return reference_df, [  # first level split by curve A, B, C
             [
@@ -827,6 +831,10 @@ def split_bulk_into_chunk(method: str):
                 reference_df[["E", "D"]].iloc[:6],
                 reference_df[["E", "D"]].iloc[6:13],
                 reference_df[["E", "D"]].iloc[13:],
+            ],
+            [
+                reference_df[["F[0]", "F[1]"]].iloc[:9],
+                reference_df[["F[0]", "F[1]"]].iloc[9:],
             ],
         ]
 
@@ -845,6 +853,7 @@ def split_bulk_into_chunk(method: str):
             # split vertically, i e by curves
             [reference_df[["B", "C", "A"]]],
             [reference_df[["D", "E"]]],
+            [reference_df[["F[0]", "F[1]"]]],
         ]
 
     if method == "no_split":
@@ -865,7 +874,7 @@ async def store_chunks(
     bulk_id="b_id",
 ) -> BulkCatalog:
     """ """
-    catalog = BulkCatalog("r_id", origin=BulkCatalogOrigin.from_file())
+    catalog = BulkCatalog(record_id, origin=BulkCatalogOrigin.from_file())
     level_0_path = storage_path_builder.record_path_level_0(record_id)
     if within_session:
         relative_base_path = storage_path_builder.session_path_level_1(None, session_id)
@@ -969,6 +978,11 @@ async def assert_read_multicases(assert_read_fn, reference_df, **common_kwargs):
         **common_kwargs, expected_df=reference_df[["E", "A"]].iloc[1:13], columns=["E", "A"], offset=1, limit=12
     )
 
+    # array
+    await assert_read_fn(**common_kwargs, expected_df=reference_df[["F[0]", "F[1]"]], columns=["F"])
+    await assert_read_fn(**common_kwargs, expected_df=reference_df[["F[0]", "F[1]"]], columns=["F[0:1]"])
+    await assert_read_fn(**common_kwargs, expected_df=reference_df[["F[0]"]], columns=["F[0]"])
+
     # WHEN offset is negative
     await assert_read_fn(**common_kwargs, expected_df=reference_df[["E", "A"]], columns=["E", "A"], offset=-1)
 
@@ -977,10 +991,18 @@ async def assert_read_multicases(assert_read_fn, reference_df, **common_kwargs):
     await assert_read_fn(
         **common_kwargs, expected_df=reference_df[["E", "A"]].iloc[1:], columns=["E", "A"], offset=1, limit=1_000
     )
+    # WHEN offset exceed row count, empty dataframe expected
+    await assert_read_fn(
+        **common_kwargs, expected_df=pd.DataFrame(columns=reference_df.columns), offset=len(reference_df)
+    )
 
     # WHEN asking no existing column
     with pytest.raises(BulkCurvesNotFound):
         await assert_read_fn(**common_kwargs, expected_df=None, columns=["Z"])
+
+    # WHEN asking no existing column
+    with pytest.raises(BulkCurvesNotFound):
+        await assert_read_fn(**common_kwargs, expected_df=None, columns=["F[2:4]"])
 
     bulk_filters = [
         BulkValueFilter(column="A", operator=BulkValueFilterOperator.Greater, value="150"),

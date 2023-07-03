@@ -12,8 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from fastapi import APIRouter, Depends, Query, HTTPException, status, Response
 from typing import List
+
+from fastapi import APIRouter, Depends, Query, HTTPException, status, Response
 
 from .filtering import BulkValueFilterOperator, ValueFilters, extract_bulk_filters
 from ..dependencies import (
@@ -23,6 +24,7 @@ from ..dependencies import (
     tenant_dependency,
 )
 from ..model.json_orient import JSONOrient
+from ..model.error_model import TooManyResourcesRequestedResponse
 from ..model.mime_types import MimeType, MimeTypes
 from .catalog import async_load_bulk_catalog_with_blob_storage
 from ..logger import get_logger
@@ -32,7 +34,18 @@ from . import read_errors
 read_bulk_router = APIRouter()
 
 
-@read_bulk_router.get("/data/{record_id}/{bulk_id}")
+@read_bulk_router.get(
+    "/data/{record_id}/{bulk_id}",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"description": "bad request"},
+        status.HTTP_404_NOT_FOUND: {"description": "resource not found"},
+        status.HTTP_412_PRECONDITION_FAILED: {"description": "not supported data format"},
+        status.HTTP_413_REQUEST_ENTITY_TOO_LARGE: {
+            "description": "the resource requested exceeds the limit.",
+            "model": TooManyResourcesRequestedResponse,
+        },
+    },
+)
 async def get_bulk_route(
     record_id: str,
     bulk_id: str,
@@ -94,13 +107,16 @@ async def get_bulk_route(
         raise HTTPException(status.HTTP_412_PRECONDITION_FAILED)
     except read_errors.BulkCurvesNotFound as e:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(e))
+    except read_errors.LimitExceededError as e:
+        return Response(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            media_type=MimeTypes.JSON.type,
+            content=TooManyResourcesRequestedResponse.from_exception(e).json(),
+        )
     except (
-        read_errors.TooManyColumnsRequested,
-        read_errors.TooManyValuesRequested,
         read_errors.ReadBulkInvalidParameter,
         read_errors.FilteringError,
     ) as e:
-        # TODO review messages returned
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
 
 

@@ -23,12 +23,32 @@ class BulkCurvesNotFound(Exception):
     pass
 
 
-class TooManyColumnsRequested(Exception):
-    pass
+class LimitExceededError(Exception):
+    def __init__(self, requested: int, limit: int, message: str | None):
+        self._requested = requested
+        self._limit = limit
+        ex_message = message or f"Resource requested exceeds the limit. requested: {requested}, limit: {limit}."
+        super().__init__(ex_message)
+
+    @property
+    def requested(self):
+        return self._requested
+
+    @property
+    def limit(self):
+        return self._limit
 
 
-class TooManyValuesRequested(Exception):
-    pass
+class TooManyValuesRequested(LimitExceededError):
+    def __init__(self, requested: int, limit: int):
+        ex_message = f"Too many values requested: {requested}. The maximum allowed is {limit}."
+        super().__init__(requested, limit, ex_message)
+
+
+class TooManyColumnsRequested(LimitExceededError):
+    def __init__(self, requested: int, limit: int):
+        ex_message = f"Too many columns requested: {requested}. The maximum allowed is {limit}."
+        super().__init__(requested, limit, ex_message)
 
 
 class ReadBulkInvalidParameter(Exception):

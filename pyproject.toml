@@ -22,10 +22,10 @@ dependencies = [
     "pandas~=1.5.2",
     "pyarrow~=10.0.1",
     "natsort",
-    "fastapi~=0.89",
+    "fastapi~=0.95.2",
     "uvicorn",
     "opencensus",
-
+    "requests>=2.31.0",
     "osdu-core-lib-python==3.0.0",
 ]
 
@@ -37,7 +37,7 @@ test = [
     "anyio",
     "pytest",
     "pytest-cov",
-    "pytest-xdist",
+    "pytest-randomly",
     "requests",  # based http client for the service tests
     "httpx",  # used by FastAPI/starlette TestClient
     "fsspec",  # local blob storage
@@ -86,7 +86,7 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "perf: performance test, usually slow test"
 ]
-addopts = "-n auto"  # comment or put 0 to disable test parallel run
+#addopts = "--p no:randomly"  # uncomment to disable random order testing
 
 [tool.mypy]
 ignore_missing_imports = "True"
