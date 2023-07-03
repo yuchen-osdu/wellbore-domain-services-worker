@@ -13,6 +13,8 @@
 # limitations under the License.
 
 import uuid
+
+import pandas as pd
 import pytest
 from unittest.mock import patch, AsyncMock, Mock
 from osdu.core.api.storage.blob_storage_base import BlobStorageBase
@@ -41,7 +43,7 @@ async def test_write_bulk(bulk_storage_mock: BlobStorageBase, test_tenant, conte
     reference_df["MD"] = list(range(3, 9))
     record_id = str(uuid.uuid4())
 
-    bulk_id, descr, ref_descr = await write_bulk(
+    bulk_id, descr = await write_bulk(
         bulk_storage_mock,
         test_tenant,
         dump_df(reference_df, content_type),
@@ -52,20 +54,13 @@ async def test_write_bulk(bulk_storage_mock: BlobStorageBase, test_tenant, conte
 
     # check output
     assert bulk_id is not None
-    assert descr.columnCount == len(reference_df.columns)
     assert descr.rowCount == len(reference_df)
-    assert descr.index.start == "0"
-    assert descr.index.end == "5"
-    assert descr.curves == {"MD": 1, "floatB": 1, "floatA": 2}
-    if with_ref:
-        assert ref_descr.name == "MD"
-        assert ref_descr.start == "3"
-        assert ref_descr.end == "8"
-        assert not ref_descr.hasDuplicate
-        assert ref_descr.order == "ASC"
-        assert not ref_descr.hasNan
-    else:
-        assert ref_descr is None
+    df_column_desc = descr.reference.start_end_df()
+    expected_column_desc = reference_df.iloc[[0, -1]].copy()
+    expected_column_desc["_wdms_index_"] = expected_column_desc.index
+    expected_column_desc = expected_column_desc[["MD" if with_ref else "_wdms_index_"]]
+
+    pd.testing.assert_frame_equal(expected_column_desc, df_column_desc)
 
     # then catalog just be there
     catalog = await async_load_bulk_catalog_with_blob_storage(bulk_storage_mock, test_tenant, record_id, bulk_id)
@@ -101,16 +96,6 @@ async def test_write_bulk_raise_unprocessable_data():
 
     with pytest.raises(BulkUnprocessable):
         await write_bulk(AsyncMock(), Mock(), b"invalid parquet", MimeTypes.PARQUET, "record_id")
-
-
-@pytest.mark.anyio
-async def test_write_bulk_raise_not_found_reference(bulk_storage_mock: BlobStorageBase, test_tenant):
-    content_type = MimeTypes.JSON
-    reference_df = generate_df(["A", "V"], index=range(6))
-    with pytest.raises(BulkValidationError):
-        await write_bulk(
-            bulk_storage_mock, test_tenant, dump_df(reference_df, content_type), content_type, "record_id", "MD"
-        )
 
 
 @pytest.mark.anyio

@@ -31,14 +31,7 @@ from pyarrow import Table
 
 from ..model.json_orient import JSONOrient
 from ..model.mime_types import MimeType, MimeTypes
-from ..model.describe import (
-    DataframeBasicDescribe,
-    ColumnBasicDescribe,
-    ColumnExtendedDescribe,
-    WDMS_INDEX_NAME,
-    ValuesOrderAscending,
-    ValuesOrderDescending,
-)
+from ..model.describe import DataframeBasicDescribe, ColumnDescribe
 from ..logger import get_logger
 
 re_column_array = re.compile(r"^(?P<name>.+)\[(?P<start>[^:]+):?(?P<stop>.*)\]$")
@@ -178,10 +171,10 @@ def get_requested_columns(column_selection: ColumnSelection, columns: Set[str]) 
             if slice_start and slice_stop:  # full slice expression provided
                 with suppress(ValueError):  # suppress int conversion exceptions
                     # TODO we may want to support floating point values ?
-                    matching_columns = columns.intersection(
-                        (f"{curve_name_slice}[{i}]" for i in range(int(slice_start), int(slice_stop) + 1))
+                    matching_columns = set(
+                        f"{curve_name_slice}[{i}]" for i in range(int(slice_start), int(slice_stop) + 1)
                     )
-        if sel in curves_array:  # no slicing + known as array => add all of them
+        elif sel in curves_array:  # no slicing + known as array => add all of them
             matching_columns = set(curves_array[sel])
 
         if not columns.issuperset(matching_columns):
@@ -277,46 +270,21 @@ def to_parquet_v0(df: pd.DataFrame) -> bytes:
 
 
 # TODO [TAG pandas dependent]
-def column_describe(df: pd.DataFrame, column_name: str) -> ColumnExtendedDescribe:
-    if column_name not in df.columns:
-        raise ValueError(f"{column_name} not found")
-    column_series = df[column_name]
-    if column_series.empty:
-        raise ValueError("empty series")
-    return ColumnExtendedDescribe(
-        name=column_name,
-        start=str(column_series.iloc[0]),
-        end=str(column_series.iloc[-1]),
-        type=str(column_series.dtype),
-        hasDuplicate=not column_series.is_unique,
-        order=(
-            ValuesOrderAscending
-            if column_series.is_monotonic_increasing
-            else ValuesOrderDescending if column_series.is_monotonic_decreasing else None
-        ),
-        hasNan=column_series.hasnans,
-    )
-
-
-# TODO [TAG pandas dependent]
-def basic_describe(df: pd.DataFrame) -> DataframeBasicDescribe:
+def basic_describe(df: pd.DataFrame, reference_name: str | None) -> DataframeBasicDescribe:
+    """
+    Construct `DataframeBasicDescribe` object from a dataframe.
+    :param df:
+    :param reference_name: column name to use as reference, if `None` or not in the dataframe, the index will be used
+                            instead with the name "_wdms_index_"
+    :return: object describe constructed
+    """
     grouped_curves = group_curve_columns(df.columns, include_non_array=True)
-    row_count = len(df.index)
-
-    index_descr = None
-    if row_count:
-        index_descr = ColumnBasicDescribe(
-            name=WDMS_INDEX_NAME,
-            start=str(df.index[0]),
-            end=str(df.index[-1]),
-            type=str(df.index.dtype),
-        )
-
-    return DataframeBasicDescribe.construct(
-        rowCount=row_count,
-        columnCount=len(df.columns),
-        index=index_descr,
-        curves={label: len(columns) for label, columns in grouped_curves.items()},
+    curves = {label: len(columns) for label, columns in grouped_curves.items()}
+    reference = ColumnDescribe.from_column(df, reference_name) if reference_name else ColumnDescribe.from_index(df)
+    return DataframeBasicDescribe(
+        rowCount=len(df.index),
+        curves=curves,
+        reference=reference,
     )
 
 

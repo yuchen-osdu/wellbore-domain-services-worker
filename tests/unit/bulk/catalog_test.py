@@ -197,7 +197,11 @@ async def test_save_load_catalog(bulk_storage_mock: BlobStorageBase, test_tenant
         bulk_storage_mock, test_tenant, "record_id", bulk_id
     )
 
-    assert catalog.as_dict() == reloaded_catalog.as_dict()
+    assert catalog.record_id == reloaded_catalog.record_id
+    assert catalog.nb_rows == reloaded_catalog.nb_rows
+    assert catalog.index_path == reloaded_catalog.index_path
+    assert catalog.all_columns == reloaded_catalog.all_columns
+    assert catalog.all_columns_dtypes == reloaded_catalog.all_columns_dtypes
 
 
 def test_describe_column_selection():

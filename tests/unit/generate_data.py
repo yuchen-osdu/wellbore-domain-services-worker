@@ -58,4 +58,8 @@ def generate_date_range(size):
 
 
 def assert_frame_equal(right, left):
+    # TODO temporary, reset index name, for now potentially set to '_wdms_index_' for compatibility with Dask
+    right.index.name = None
+    left.index.name = None
+
     pd.testing.assert_frame_equal(right, left)
