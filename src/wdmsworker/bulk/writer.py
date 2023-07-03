@@ -19,7 +19,7 @@ Module containing high level functions to write bulk data
 import uuid
 from io import BytesIO
 import asyncio
-from typing import Tuple, Optional
+from typing import Tuple
 
 from osdu.core.api.storage.blob_storage_base import BlobStorageBase
 
@@ -27,9 +27,9 @@ from osdu.core.api.storage.blob_storage_base import BlobStorageBase
 from .validators import validate_all, columns_not_in_reserved_names, validate_index
 from . import storage_path_builder
 from .catalog import build_chunk_metadata_json
-from .dataframe import load_df, basic_describe, column_describe
+from .dataframe import load_df, basic_describe, dump_df
 from .catalog import BulkCatalog, async_save_bulk_catalog_with_blob_storage
-from ..model.describe import DataframeBasicDescribe, ColumnExtendedDescribe
+from ..model.describe import DataframeBasicDescribe
 from ..model.mime_types import MimeType, MimeTypes
 from . import write_errors as exc
 from ..logger import get_logger
@@ -81,7 +81,7 @@ async def write_bulk_data_in_session(
         get_logger().exception(f"Exception occurred while uploading to blob storage for record {record_id}: {e}")
         raise exc.BulkUploadFailure("Failed to store bulk and its metadata") from e
 
-    return basic_describe(df)
+    return basic_describe(df, None)
 
 
 @capture_timings("write_bulk")
@@ -92,7 +92,7 @@ async def write_bulk(
     content_type: MimeType,
     record_id: str,
     reference_curve: str | None = None,
-) -> Tuple[str, DataframeBasicDescribe, Optional[ColumnExtendedDescribe]]:
+) -> Tuple[str, DataframeBasicDescribe]:
     """
     Write whole bulk (no session)
     :param storage:
@@ -115,19 +115,12 @@ async def write_bulk(
         raise exc.BulkUnprocessable("empty bulk")
 
     # TODO required for Dask to resolve conflict, should not be needed once write fully moved to worker
-    # df.index.name = "_wdms_index_"
+    df.index.name = "_wdms_index_"
 
     # 2- validate df
     validation = validate_all(df, [columns_not_in_reserved_names, validate_index])
     if not validation.ok:
         raise exc.BulkValidationError(validation.errors)
-
-    ref_describe = None
-    if reference_curve:
-        try:
-            ref_describe = column_describe(df, reference_curve)
-        except ValueError as e:
-            raise exc.BulkValidationError(f'curve "{reference_curve}" not found') from e
 
     # 3- build blob filename
     bulk_id = str(uuid.uuid4())
@@ -136,20 +129,24 @@ async def write_bulk(
         bulk_base_path, storage_path_builder.generate_chunk_filename(df) + ".parquet"
     )
 
-    # 4- generate catalog
-    if content_type == MimeTypes.JSON:  # we don't need de re-serialize if already in parquet
-        content = df.to_parquet(None, index=True, engine="pyarrow")
+    # TODO temporary, for Dask compatibility until write full moved to workers, it's needed to re-serialize to have
+    #  the index name set.
+    need_serialize = True  # if content_type == MimeTypes.JSON:  # we don't need de re-serialize if already in parquet
+    content_to_upload: str | bytes = content
+    if need_serialize:
+        content_to_upload = dump_df(df, MimeTypes.PARQUET)
 
+    # 4- generate catalog
     catalog = BulkCatalog.from_single_dataframe(record_id, full_file_path, df)
 
     # 5- both upload meta and data
     try:
         await asyncio.gather(
             async_save_bulk_catalog_with_blob_storage(storage, tenant, bulk_id, catalog),
-            storage.upload(tenant, full_file_path, content),
+            storage.upload(tenant, full_file_path, content_to_upload),
         )
     except Exception as e:
         get_logger().exception(f"Exception occurred while uploading to blob storage for record {record_id}: {e}")
         raise exc.BulkUploadFailure("Failed to store bulk and its metadata") from e
 
-    return bulk_id, basic_describe(df), ref_describe
+    return bulk_id, basic_describe(df, reference_curve)

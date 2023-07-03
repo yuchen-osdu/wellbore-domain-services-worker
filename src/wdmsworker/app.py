@@ -16,16 +16,20 @@ from os import environ
 from logging import getLogger
 
 from fastapi import FastAPI, Request
-from starlette.middleware.base import BaseHTTPMiddleware
+
 
 from . import get_version
 from . import constants
 from .provider import initialize_for_provider
 from .bulk.write_router import write_bulk_router
 from .bulk.read_router import read_bulk_router
+from .statistics.statistics_routes import (
+    router as statistics_router,
+    BulkStatisticsHTTPException,
+    http_stats_error_handler,
+)
 from .http_middlewares import (
-    logging_exception_middleware,
-    tracing_middleware,
+    add_middlewares_to_app,
 )
 
 open_api_prefix = environ.get(constants.OPENAPI_PREFIX_ENV_VAR, constants.API_PREFIX)
@@ -39,8 +43,7 @@ app = FastAPI(
 base = FastAPI()
 base.mount(open_api_prefix, app)
 
-app.add_middleware(BaseHTTPMiddleware, dispatch=logging_exception_middleware)
-app.add_middleware(BaseHTTPMiddleware, dispatch=tracing_middleware)
+add_middlewares_to_app(app)
 
 
 @base.on_event("startup")
@@ -120,5 +123,8 @@ async def about_route(request: Request):
 # ---------------------------------------------------------------
 # ---------------------------------------------------------------
 
+app.add_exception_handler(BulkStatisticsHTTPException, http_stats_error_handler)
+
 app.include_router(write_bulk_router)
 app.include_router(read_bulk_router)
+app.include_router(statistics_router)

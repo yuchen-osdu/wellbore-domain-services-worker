@@ -95,8 +95,8 @@ async def test_get_bulk_route_simple_describe(get_bulk_route_kwargs, catalog_sto
     "error,expected_code",
     [
         (err.BulkCurvesNotFound(), 404),
-        (err.TooManyColumnsRequested(), 400),
-        (err.TooManyValuesRequested(), 400),
+        (err.TooManyColumnsRequested(100, 10), 413),
+        (err.TooManyValuesRequested(100, 10), 413),
         (err.ReadBulkInvalidParameter(), 400),
         (err.ReadBulkCaseNotSupportedException(), 412),
     ],
@@ -105,6 +105,29 @@ async def test_get_bulk_route_error_vs_status_code(error, expected_code, get_bul
     with patch("wdmsworker.bulk.read_router.reader.read_bulk", AsyncMock(side_effect=error)):
         with pytest.raises(HTTPException) as e:
             await get_bulk_route(**get_bulk_route_kwargs)
+
+        exc = e.value
+        assert exc.status_code == expected_code
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "error,expected_code",
+    [
+        (err.BulkCurvesNotFound(), 404),
+        (err.TooManyColumnsRequested(100, 10), 413),
+        (err.TooManyValuesRequested(100, 10), 413),
+        (err.ReadBulkInvalidParameter(), 400),
+        (err.ReadBulkCaseNotSupportedException(), 412),
+    ],
+)
+async def test_get_bulk_route_error_vs_status_code(error, expected_code, get_bulk_route_kwargs, catalog_storage_mock):
+    with patch("wdmsworker.bulk.read_router.reader.read_bulk", AsyncMock(side_effect=error)):
+        with pytest.raises(HTTPException) as e:
+            response = await get_bulk_route(**get_bulk_route_kwargs)
+            # either it raises directly an HTTPException or construct a response with an error status so check both
+            assert response.status_code == expected_code
+            raise HTTPException(status_code=response.status_code)
 
         exc = e.value
         assert exc.status_code == expected_code

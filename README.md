@@ -67,11 +67,6 @@ pip install .[provider] --extra-index-url https://community.opengroup.org/api/v4
 
 ## Run tests
 
-### Tests are run in parallel
-By default, tests are run in parallel using the plugin [pytest-xdist](https://pytest-xdist.readthedocs.io/en/latest/).
-It could produce hard to read logs when debugging. To disable it, go to the [pyproject.toml](pyproject.toml) and update
-line `addopts = "-n auto"` accordingly.
-
 
 ### Unit tests
 

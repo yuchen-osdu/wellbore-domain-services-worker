@@ -12,12 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional
 from fastapi import APIRouter, Depends, Request, HTTPException, status, Query
 from pydantic import BaseModel
 
 from ..dependencies import blob_storage_dependency, tenant_dependency, content_type_dependency
-from ..model.describe import DataframeBasicDescribe, ColumnExtendedDescribe
+from ..model.describe import DataframeBasicDescribe
 from ..model.mime_types import MimeType
 from . import writer
 from . import write_errors as exc
@@ -36,7 +35,6 @@ class WriteBulkResponse(BaseModel):
 
     bulkid: str
     describe: DataframeBasicDescribe
-    reference: Optional[ColumnExtendedDescribe]
 
 
 @write_bulk_router.post("/data/{record_id}/session/{session_id}")
@@ -68,7 +66,7 @@ async def post_bulk_data_route(
     tenant=Depends(tenant_dependency),
 ) -> WriteBulkResponse:
     try:
-        bulk_id, bulk_description, ref_description = await writer.write_bulk(
+        bulk_id, bulk_description = await writer.write_bulk(
             storage, tenant, await request.body(), content_type, record_id, reference
         )
     except exc.BulkUnprocessable as e:
@@ -81,7 +79,7 @@ async def post_bulk_data_route(
         get_logger().exception(f"exception at upload data to blob storage {e}")
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    return WriteBulkResponse.construct(bulkid=bulk_id, describe=bulk_description, reference=ref_description)
+    return WriteBulkResponse.construct(bulkid=bulk_id, describe=bulk_description)
 
 
 # TODO for now let consumer handle session part

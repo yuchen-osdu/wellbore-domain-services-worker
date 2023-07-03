@@ -195,6 +195,12 @@ def session_path_level_1(record_id: str | None, session_id: str, *, base_directo
     return join(record_path_level_0(record_id, base_directory=base_directory), "session", str(session_id), "data")
 
 
+def record_statistics_base_path(record_id: str, bulk_id: str, api_version: str, base_directory: str | None) -> str:
+    """Return the path corresponding to the statistics of specified bulk."""
+    bulk_base_path = record_path_level_0(record_id, base_directory=base_directory)
+    return join(bulk_base_path, "bulk", bulk_id, f"statistics.v{api_version}")
+
+
 def catalog_file_path(record_id: str, bulk_id: str, *, base_directory: str | None = None) -> str:
     folder_path = bulk_path_level_1(
         record_id, bulk_id, base_directory=base_directory

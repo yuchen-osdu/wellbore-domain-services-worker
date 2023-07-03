@@ -31,12 +31,11 @@ from wdmsworker.bulk.dataframe import (
     load_df,
     expand_columns,
     basic_describe,
-    column_describe,
     get_row_count_and_columns,
     dump_df,
 )
 
-from wdmsworker.model.describe import DataframeBasicDescribe, ColumnBasicDescribe, ColumnExtendedDescribe
+from wdmsworker.model.describe import DataframeBasicDescribe, ColumnDescribe
 
 
 @pytest.mark.parametrize("columns", [["A", "B", "C"], [0, 1, 3], [0.0, 1.1, 7.1]])
@@ -174,6 +173,20 @@ def test_select_columns():
         True,
     )
 
+    # non existing slicing
+    assert get_requested_columns(["A[5:7]"], {"A[0]", "A[1]", "A[2]", "A[3]", "A[4]", "A[5]", "A[6]"}) == (
+        [],
+        ["A[7]"],
+        True,
+    )
+
+    # non existing slicing, full outbound slice
+    _, non_existing, _ = get_requested_columns(["A[50:51]"], {"A[0]", "A[1]", "A[2]", "A[3]", "A[4]", "A[5]", "A[6]"})
+    assert set(non_existing) == {"A[50]", "A[51]"}
+
+    # non existing curve
+    assert get_requested_columns(["A", "Z"], {"A", "B", "C", "D"}) == (["A"], ["Z"], False)
+
 
 def test_load_df():
     df = pd.DataFrame({"a": [1, 2], "z": [3, 4], "b": [5, None]})
@@ -185,105 +198,108 @@ def test_load_df():
 
 
 @pytest.mark.parametrize(
-    "dataframe,expected",
+    "dataframe,ref_name,expected",
     [
         (
-            pd.DataFrame({"a": [1, 2], "z": [3, 4], "b": [5, None]}, index=pd.Index(range(3, 5), dtype="int64")),
+            pd.DataFrame({"a": [1, 2], "z": [3, 4], "b": [5, None]}, index=pd.Index(range(3, 5))),
+            None,
             DataframeBasicDescribe(
                 rowCount=2,
-                columnCount=3,
-                index=ColumnBasicDescribe(name="_wdms_index_", start="3", end="4", type="int64"),
                 curves={"a": 1, "z": 1, "b": 1},
+                reference=ColumnDescribe(
+                    name="_wdms_index_",
+                    startEnd=pd.DataFrame({"_wdms_index_": [3, 4]}, index=[3, 4]).to_dict("split"),
+                    monotonicity="increasing",
+                    hasDuplicate=False,
+                    hasNan=False,
+                    dataType="int64",
+                ),
             ),
         ),
         (
-            pd.DataFrame({"a[0]": [1], "a[2]": [3]}, index=pd.Index([3.3], dtype="float64")),
+            pd.DataFrame({"a[0]": [1], "a[2]": [3]}, index=pd.Index([3.3])),
+            None,
             DataframeBasicDescribe(
                 rowCount=1,
-                columnCount=2,
-                index=ColumnBasicDescribe(name="_wdms_index_", start="3.3", end="3.3", type="float64"),
                 curves={"a": 2},
+                reference=ColumnDescribe(
+                    name="_wdms_index_",
+                    startEnd=pd.DataFrame({"_wdms_index_": [3.3]}, index=[3.3]).to_dict("split"),
+                    monotonicity="increasing",
+                    hasDuplicate=False,
+                    hasNan=False,
+                    dataType="float64",
+                ),
             ),
         ),
         (
             pd.DataFrame({"a": [1, 2, 3], "z": [3, 4, 5]}, index=pd.Index(["a", "b", "c"])),
+            None,
             DataframeBasicDescribe(
                 rowCount=3,
-                columnCount=2,
-                index=ColumnBasicDescribe(name="_wdms_index_", start="a", end="c", type="object"),
                 curves={"a": 1, "z": 1},
-            ),
-        ),
-        (pd.DataFrame(), DataframeBasicDescribe(rowCount=0, columnCount=0, curves={})),
-    ],
-)
-def test_basic_describe(dataframe, expected):
-    assert basic_describe(dataframe) == expected
-
-
-@pytest.mark.parametrize(
-    "dataframe,expected",
-    [
-        (
-            pd.DataFrame({"a": [1, 2, 4]}),
-            ColumnExtendedDescribe(
-                name="a",
-                start="1",
-                end="4",
-                type="int64",
-                hasDuplicate=False,
-                order="ASC",
-                hasNan=False,
+                reference=ColumnDescribe(
+                    name="_wdms_index_",
+                    startEnd=pd.DataFrame({"_wdms_index_": ["a", "c"]}, index=pd.Index(["a", "c"])).to_dict("split"),
+                    monotonicity="increasing",
+                    hasDuplicate=False,
+                    hasNan=False,
+                    dataType="object",
+                ),
             ),
         ),
         (
-            pd.DataFrame({"a": [2.1, 1.2, -4.0]}),
-            ColumnExtendedDescribe(
-                name="a",
-                start="2.1",
-                end="-4.0",
-                type="float64",
-                hasDuplicate=False,
-                order="DESC",
-                hasNan=False,
+            pd.DataFrame({"a": [1.1, None, 1.1], "z": [5, 4, 1]}, index=pd.Index([3, 2, 1])),
+            "z",
+            DataframeBasicDescribe(
+                rowCount=3,
+                curves={"a": 1, "z": 1},
+                reference=ColumnDescribe(
+                    name="z",
+                    startEnd=pd.DataFrame({"z": [5, 1]}, index=pd.Index([3, 1])).to_dict("split"),
+                    monotonicity="decreasing",
+                    hasDuplicate=False,
+                    hasNan=False,
+                    dataType="int64",
+                ),
             ),
         ),
         (
-            pd.DataFrame({"a": [1, 1, 4]}),
-            ColumnExtendedDescribe(
-                name="a",
-                start="1",
-                end="4",
-                type="int64",
-                hasDuplicate=True,
-                order="ASC",
-                hasNan=False,
-            ),
-        ),
-        (
-            pd.DataFrame({"a": [1.1, None, 4.7, None]}),
-            ColumnExtendedDescribe(
-                name="a",
-                start="1.1",
-                end="nan",
-                type="float64",
-                hasDuplicate=True,
-                order=None,
-                hasNan=True,
+            pd.DataFrame({"a": [1.1, None, 1.1], "z": [3, 4, 5]}, index=pd.Index([3, 2, 1])),
+            "a",
+            DataframeBasicDescribe(
+                rowCount=3,
+                curves={"a": 1, "z": 1},
+                reference=ColumnDescribe(
+                    name="a",
+                    startEnd=pd.DataFrame({"a": [1.1, 1.1]}, index=pd.Index([3, 1])).to_dict("split"),
+                    monotonicity=None,
+                    hasDuplicate=True,
+                    hasNan=True,
+                    dataType="float64",
+                ),
             ),
         ),
     ],
 )
-def test_column_describe(dataframe, expected):
-    assert column_describe(dataframe, "a") == expected
+def test_basic_describe(dataframe, ref_name, expected):
+    actual = basic_describe(dataframe, ref_name)
+    assert actual == expected
 
 
-def test_column_describe_invalid_cases():
-    with pytest.raises(ValueError):
-        column_describe(pd.DataFrame({"a": range(3)}), "c")
+def test_basic_describe_unknown_column():
+    df = generate_df(["GR", "DEN"], range(5))
+    desc = basic_describe(df, "MD")
+    assert not desc.reference.start_end_df().empty
+    assert "MD" not in desc.reference.start_end_df()
+    assert desc.reference.name != "MD"
 
-    with pytest.raises(ValueError):
-        column_describe(pd.DataFrame({"a": []}), "a")
+
+def test_basic_describe_on_empty():
+    desc = basic_describe(pd.DataFrame(), "MD")
+    assert desc.curves == {}
+    assert desc.rowCount == 0
+    assert desc.reference.start_end_df().empty
 
 
 @pytest.mark.parametrize(

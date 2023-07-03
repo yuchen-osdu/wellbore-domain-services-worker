@@ -351,9 +351,6 @@ def _validate_parameters(
     if total_values_filtered > constants.READ_MAX_TOTAL_VALUES_COUNT_FILTERED:
         raise read_errors.TooManyValuesRequested(total_values_filtered, constants.READ_MAX_TOTAL_VALUES_COUNT_FILTERED)
 
-    if filtered_row_count == 0:
-        raise read_errors.ReadBulkInvalidParameter("zero data requested")
-
     columns_to_load = [*requested_columns, *extra_filtering_cols]
 
     return columns_to_load, BulkFilters(

@@ -1,4 +1,4 @@
-# Copyright 2023 Schlumberger
+# Copyright 2023 SLB
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,16 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# environment variables names
-CLOUD_PROVIDER_ENV_VAR = "CLOUD_PROVIDER"
-OPENAPI_PREFIX_ENV_VAR = "OPENAPI_PREFIX"
 
-SERVICE_NAME = "os-wellbore-ddms-worker"
-SERVICE_NAME_ENV_VAR = "SERVICE_NAME"
+from pydantic import BaseModel
+from ..bulk.read_errors import LimitExceededError
 
-SERVICE_INTERNAL_NAME = "wdmsworker"
-API_PREFIX = "/api/wdms-worker"
 
-CORRELATION_ID_HEADER_NAME = "correlation-id"
-REQUEST_ID_HEADER_NAME = "request-id"
-PARTITION_ID_HEADER_NAME = "data-partition-id"
+class TooManyResourcesRequestedResponse(BaseModel):
+    message: str
+    requested: int
+    limit: int
+
+    @classmethod
+    def from_exception(cls, ex: LimitExceededError):
+        return cls.construct(message=str(ex), requested=ex.requested, limit=ex.limit)

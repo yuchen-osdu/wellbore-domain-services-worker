@@ -12,14 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Dict
 import logging
-from .constants import SERVICE_INTERNAL_NAME
+from typing import Dict
 from fastapi import Request
+
 from . import constants
+from .http_middlewares import get_context
+from .constants import SERVICE_INTERNAL_NAME
 
 
 def get_logger():
+    """Return enriched logger from current request's context if exist or default service logger"""
+
+    current_request_ctx = get_context()
+    if current_request_ctx and current_request_ctx.logger:
+        return current_request_ctx.logger
+
     return logging.getLogger(SERVICE_INTERNAL_NAME)
 
 

@@ -46,7 +46,7 @@ unit-tests:
 
 
 service-tests:
-  tags: ["osdu-small"]
+  tags: ["osdu-medium"]
   stage: testing
   script:
     - coverage run -m pytest ./tests/service --junitxml=report.xml
