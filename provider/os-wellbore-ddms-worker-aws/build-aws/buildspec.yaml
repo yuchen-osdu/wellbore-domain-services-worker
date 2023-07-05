@@ -26,8 +26,6 @@ env:
 
 phases:
   install:
-    runtime-versions:
-      java: corretto8
     commands:
       # fix error noted here: https://github.com/yarnpkg/yarn/issues/7866
       - curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | apt-key add -
@@ -35,7 +33,10 @@ phases:
       - apt-get update -y
       - wget -nv https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-4.6.2.2472.zip
       - unzip -q ./sonar-scanner-cli-4.6.2.2472.zip
-      - pip install safety
+    
+      - python3 -m pip install --upgrade pip
+      - pip3 install safety
+      
       # Install git secrets
       #TODO temporarily adding hotfix, due to https://github.com/awslabs/git-secrets/issues/220
       - export SAY_LOCATION=`ln -s "$(which echo)" say`
@@ -69,6 +70,7 @@ phases:
         python provider/os-wellbore-ddms-worker-aws/build-aws/build-info.py --branch ${CODEBUILD_SOURCE_VERSION} --commit ${CODEBUILD_RESOLVED_SOURCE_VERSION} \
           --buildid ${CODEBUILD_BUILD_ID} --buildnumber ${CODEBUILD_BUILD_NUMBER} --reponame ${REPO_NAME} --outdir ${OUTPUT_DIR} \
           --artifact ${ECR_IMAGE}
+
 
       - GIT_SECRETS_SCAN_RESULT=$(git secrets --scan 2> ${OUTPUT_DIR}/git_secrets.out.txt && echo OK || echo FAILED)
       - if [ "$GIT_SECRETS_SCAN_RESULT" = "FAILED" ]; then echo "Secrets detected!" && exit 1; fi
