@@ -1,0 +1,4 @@
+{{- template "common.serviceparameters" (list . "os-wellbore-ddms-worker.serviceparameters") -}}
+{{- define "os-wellbore-ddms-worker.serviceparameters" -}}
+## Define overrides for the service parameters here
+{{- end -}}

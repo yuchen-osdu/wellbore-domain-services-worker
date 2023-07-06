@@ -1,0 +1,11 @@
+apiVersion: v2
+name: os-wellbore-ddms-worker
+version: __CHART_VERSION__
+description: Wellbore Worker Helm chart for Kubernetes
+type: application
+appVersion: __VERSION__
+dependencies:
+  - name: osdu-aws-lib
+    version: ~0
+    repository: __HELM_REPO__
+deprecated: false

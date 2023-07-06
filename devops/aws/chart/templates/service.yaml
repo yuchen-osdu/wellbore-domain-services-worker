@@ -1,0 +1,4 @@
+{{- template "common.service" (list . "os-wellbore-ddms-worker.service") -}}
+{{- define "os-wellbore-ddms-worker.service" -}}
+## Define overrides for the service resource here
+{{- end -}}

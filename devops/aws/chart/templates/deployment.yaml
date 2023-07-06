@@ -1,0 +1,4 @@
+{{- template "common.deployment" (list . "os-wellbore-ddms-worker.deployment") -}}
+{{- define "os-wellbore-ddms-worker.deployment" -}}
+## Define overrides for the service deployment resource here
+{{- end -}}
