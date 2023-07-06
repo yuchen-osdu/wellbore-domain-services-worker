@@ -1,0 +1,101 @@
+# Copyright 2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http:#www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+version: 0.2
+
+env:
+  secrets-manager:
+    DOCKER_USERNAME: /osdu/devops/docker_credentials:username
+    DOCKER_PASSWORD: /osdu/devops/docker_credentials:password
+    SONAR_USERNAME: /osdu/devops/sonar_credentials:username
+    SONAR_PASSWORD: /osdu/devops/sonar_credentials:password
+  
+  parameter-store:
+    SONAR_URL: /osdu/devops/sonar_url
+
+phases:
+  install:
+    commands:
+      # fix error noted here: https://github.com/yarnpkg/yarn/issues/7866
+      - curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | apt-key add -
+      - if [ $(echo $CODEBUILD_SOURCE_VERSION | grep -c  ^refs/heads.*) -eq 1 ]; then echo "Branch name found"; else echo "This build only supports branch builds" && exit 1; fi
+      - apt-get update -y
+      - wget -nv https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-4.6.2.2472.zip
+      - unzip -q ./sonar-scanner-cli-4.6.2.2472.zip
+    
+      - python3 -m pip install --upgrade pip
+      - pip3 install safety
+      
+      # Install git secrets
+      #TODO temporarily adding hotfix, due to https://github.com/awslabs/git-secrets/issues/220
+      - export SAY_LOCATION=`ln -s "$(which echo)" say`
+      - export PATH="$PATH:$SAY_LOCATION"
+
+      - git clone https://github.com/awslabs/git-secrets.git
+      - cd git-secrets && make install && cd ..
+      - git secrets --install && git secrets --register-aws
+
+  pre_build:
+    commands:
+      - echo "Logging in to Amazon ECR..."
+      - $(aws ecr get-login --no-include-email --region $AWS_REGION) # authenticate with ECR via the AWS CLI
+
+  build:
+    commands:
+      - export OUTPUT_DIR="dist"
+      - mkdir ${OUTPUT_DIR}
+      - mkdir ${OUTPUT_DIR}/python-safety
+      - export REPO_NAME=${PWD##*/}
+      - export BRANCH_NAME=`echo ${CODEBUILD_SOURCE_VERSION} | awk '{gsub("refs/heads/","");gsub("\\.","-");gsub("[[:space:]]","-")}1' | sed 's/\//-/g' | awk '{print tolower($0)}'`
+      - export ECR_TAG=`echo build.${BRANCH_NAME}.${CODEBUILD_BUILD_NUMBER}.${CODEBUILD_RESOLVED_SOURCE_VERSION} | cut -c 1-120`
+      - export ECR_IMAGE=${ECR_REGISTRY}:${ECR_TAG}
+      - export ECR_IMAGE_BRANCH_LATEST=${ECR_REGISTRY}:${BRANCH_NAME}
+      - export AWS_ACCOUNT_ID=`aws sts get-caller-identity | grep Account | cut -d':' -f 2 | cut -d'"' -f 2`
+
+      - echo "Placeholder" >> ${OUTPUT_DIR}/build-info.json # touched so that the output directory has some content incase the build fails so that testing reports are uploaded
+
+      - echo "Generate build-info.json"
+      - |
+        python provider/os-wellbore-ddms-worker-aws/build-aws/build-info.py --branch ${CODEBUILD_SOURCE_VERSION} --commit ${CODEBUILD_RESOLVED_SOURCE_VERSION} \
+          --buildid ${CODEBUILD_BUILD_ID} --buildnumber ${CODEBUILD_BUILD_NUMBER} --reponame ${REPO_NAME} --outdir ${OUTPUT_DIR} \
+          --artifact ${ECR_IMAGE}
+
+
+      - GIT_SECRETS_SCAN_RESULT=$(git secrets --scan 2> ${OUTPUT_DIR}/git_secrets.out.txt && echo OK || echo FAILED)
+      - if [ "$GIT_SECRETS_SCAN_RESULT" = "FAILED" ]; then echo "Secrets detected!" && exit 1; fi
+
+      # using jar instead of executable since exe requires 32 bit image and doesn't work on codebuild 4.0
+      - |
+        java -jar sonar-scanner-4.6.2.2472/lib/sonar-scanner-cli-4.6.2.2472.jar -Dsonar.projectKey=wellbore-ddms-worker -Dsonar.host.url=${SONAR_URL} \
+          -Dsonar.login=${SONAR_USERNAME} -Dsonar.password=${SONAR_PASSWORD} -Dsonar.branch.name=${BRANCH_NAME}
+      
+
+      - sed -i "s|__CONTAINER__|$ECR_IMAGE|"  devops/aws/chart/values.yaml
+      - echo "--Copying Helm Charts to ${OUTPUT_DIR:-dist}--"
+      - rsync -r devops/aws/* "${OUTPUT_DIR:-dist}"
+      
+      - echo "Logging into Docker Hub..."
+      - docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD}
+
+      - echo "Building docker image..."
+      - docker build -f provider/os-wellbore-ddms-worker-aws/build-aws/Dockerfile -t ${ECR_IMAGE} .
+      - docker tag  ${ECR_IMAGE} ${ECR_IMAGE_BRANCH_LATEST}
+      - echo "Pushing docker image..."
+      - docker push ${ECR_IMAGE}
+      - docker push ${ECR_IMAGE_BRANCH_LATEST}
+artifacts:
+  files:
+    - "**/*"
+  base-directory: "dist"
+  name: ${REPO_NAME}_${BRANCH_NAME}_$(date +%F)_${CODEBUILD_BUILD_NUMBER}.zip

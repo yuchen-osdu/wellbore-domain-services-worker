@@ -65,7 +65,9 @@ az = [
 ]
 
 aws = [
-    # TODO: add dependencies specific to aws
+    "boto3",
+    "botocore",
+    "osdu-core-lib-python-aws==2.1.1",
 ]
 
 ibm = [

@@ -1,0 +1,4 @@
+{{- template "common.scaledobject" (list . "os-wellbore-ddms-worker.scaledobject") -}}
+{{- define "os-wellbore-ddms-worker.scaledobject" -}}
+## Define overrides for the service's scaled object resource here
+{{- end -}}

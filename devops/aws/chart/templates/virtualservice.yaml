@@ -1,0 +1,4 @@
+{{- template "common.virtualservice" (list . "os-wellbore-ddms-worker.virtualservice") -}}
+{{- define "os-wellbore-ddms-worker.virtualservice" -}}
+## Define overrides for the service's virtual service resource here
+{{- end -}}

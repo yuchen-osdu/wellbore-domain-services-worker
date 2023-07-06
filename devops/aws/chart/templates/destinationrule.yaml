@@ -1,0 +1,4 @@
+{{- template "common.destinationrule" (list . "os-wellbore-ddms-worker.destinationrule") -}}
+{{- define "os-wellbore-ddms-worker.destinationrule" -}}
+## Define overrides for the service destination rule resource here
+{{- end -}}
