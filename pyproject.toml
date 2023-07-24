@@ -67,7 +67,7 @@ az = [
 aws = [
     "boto3",
     "botocore",
-    "osdu-core-lib-python-aws==2.1.1",
+    "osdu-core-lib-python-aws==2.2.1",
 ]
 
 ibm = [
