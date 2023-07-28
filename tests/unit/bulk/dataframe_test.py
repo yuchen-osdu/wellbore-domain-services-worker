@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import io
+from functools import reduce
 
 import pytest
 
-# TODO [TAG pandas dependent]
 import pandas as pd
 
 from wdmsworker.model.json_orient import JSONOrient
@@ -33,17 +33,10 @@ from wdmsworker.bulk.dataframe import (
     basic_describe,
     get_row_count_and_columns,
     dump_df,
+    split_into_chunks,
 )
 
 from wdmsworker.model.describe import DataframeBasicDescribe, ColumnDescribe
-
-
-@pytest.mark.parametrize("columns", [["A", "B", "C"], [0, 1, 3], [0.0, 1.1, 7.1]])
-def test_dump_parquet(columns):
-    ref_df = generate_df(columns, range(10))
-    content = io.BytesIO(dump_df(ref_df, MimeTypes.PARQUET))
-    actual_df = pd.read_parquet(content)
-    pd.testing.assert_frame_equal(ref_df, actual_df)
 
 
 @pytest.mark.parametrize("columns", [["A", "B", "C"], [0, 1, 3], [0.0, 1.1, 7.1]])
@@ -318,3 +311,41 @@ def test_get_row_count_and_columns(df, expected_result):
 
     # Assert that the result is a tuple containing the expected number of rows and columns
     assert result == expected_result
+
+
+@pytest.mark.parametrize(
+    "nb_rows,nb_cols,max_chunk_values,max_chunk_cols",
+    [
+        [4, 4, 20, 4],  # no split needed
+        [4, 4, 12, 4],  # split on columns because max values
+        [14, 4, 12, 2],  # split on row because single columns contains more than max
+    ],
+)
+def test_split_into_chunks(nb_rows, nb_cols, max_chunk_values, max_chunk_cols):
+    reference_df = generate_df([f"float_{i}" for i in range(nb_cols)], index=range(nb_rows))
+    dfs = split_into_chunks(reference_df, max_values_per_chunk=max_chunk_values, max_columns_per_chunk=max_chunk_cols)
+
+    for df in dfs:
+        assert len(df.columns) <= max_chunk_cols
+        assert df.size <= max_chunk_values
+
+        # ensure it always columns first cut
+        # so cut on row only occurs if on single column too big
+        if max_chunk_values >= nb_rows:
+            assert len(df) == nb_rows
+
+    # reconstruct
+    actual_df = reduce(lambda acc, d: acc.combine_first(d), dfs)
+    actual_df = actual_df[reference_df.columns.tolist()]  # reorder columns as previous reconstruct do not preserve it
+
+    pd.testing.assert_frame_equal(reference_df, actual_df)
+
+
+def test_split_into_chunks_empty_dataframe():
+    df = pd.DataFrame()
+    chunks = split_into_chunks(df, max_values_per_chunk=4, max_columns_per_chunk=5)
+    assert chunks == [df]
+
+    df = pd.DataFrame({"a": [], "b": []})
+    chunks = split_into_chunks(df, max_values_per_chunk=4, max_columns_per_chunk=5)
+    assert chunks == [df]

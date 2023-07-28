@@ -23,7 +23,7 @@ from wdmsworker.bulk.catalog import BulkCatalog
 from wdmsworker.bulk.reader import ReadResult
 from wdmsworker.bulk.read_router import get_bulk_route, _build_describe_response
 from wdmsworker.model.mime_types import MimeTypes
-from wdmsworker.bulk import read_errors as err
+from wdmsworker.bulk import errors as err
 
 
 @pytest.fixture
@@ -94,11 +94,11 @@ async def test_get_bulk_route_simple_describe(get_bulk_route_kwargs, catalog_sto
 @pytest.mark.parametrize(
     "error,expected_code",
     [
-        (err.BulkCurvesNotFound(), 404),
-        (err.TooManyColumnsRequested(100, 10), 413),
-        (err.TooManyValuesRequested(100, 10), 413),
-        (err.ReadBulkInvalidParameter(), 400),
-        (err.ReadBulkCaseNotSupportedException(), 412),
+        (err.CurvesNotFoundError(), 404),
+        (err.TooManyColumnsError(100, 10), 413),
+        (err.TooManyValuesError(100, 10), 413),
+        (err.InvalidParameterError(), 400),
+        (err.BulkCaseNotSupportedError(), 412),
     ],
 )
 async def test_get_bulk_route_error_vs_status_code(error, expected_code, get_bulk_route_kwargs, catalog_storage_mock):
@@ -114,11 +114,11 @@ async def test_get_bulk_route_error_vs_status_code(error, expected_code, get_bul
 @pytest.mark.parametrize(
     "error,expected_code",
     [
-        (err.BulkCurvesNotFound(), 404),
-        (err.TooManyColumnsRequested(100, 10), 413),
-        (err.TooManyValuesRequested(100, 10), 413),
-        (err.ReadBulkInvalidParameter(), 400),
-        (err.ReadBulkCaseNotSupportedException(), 412),
+        (err.CurvesNotFoundError(), 404),
+        (err.TooManyColumnsError(100, 10), 413),
+        (err.TooManyValuesError(100, 10), 413),
+        (err.InvalidParameterError(), 400),
+        (err.BulkCaseNotSupportedError(), 412),
     ],
 )
 async def test_get_bulk_route_error_vs_status_code(error, expected_code, get_bulk_route_kwargs, catalog_storage_mock):

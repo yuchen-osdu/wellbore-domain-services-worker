@@ -17,15 +17,11 @@ Utility functions that gathers method to build path for bulk storage
 """
 
 import hashlib
-from os.path import relpath
-from os.path import join as os_path_join, basename as os_path_basename
-import time
-from re import compile
+from os.path import relpath as os_path_relpath
+from os.path import join as os_path_join, basename as os_path_basename, split as os_path_split
 import pickle
 import base64
-
-# TODO [TAG pandas dependent]
-import pandas as pd
+from typing import Any, Tuple
 
 """
 bulk path organization.
@@ -74,87 +70,25 @@ chunk1-path = session/session_id_1/data/chunk1.parquet
 """
 
 
-def _obj_to_hash_str(obj):
-    """generate a hash as string from an object. the hash is generated using SHA1 encode as base 32 but only
-    keeping the last 16 characters. Motivations are:
-       - base32: so can be used in filename or in URL without any needs of encoding, take less chars than hex
-       - last 16: to reduce the number of characters and avoid potential storage limitation. It remains valid
-           as it will be between very few items (chunks), at maximum few thousands, then the collision likelihood is
-           infinitesimal
+def hash_for_filename(obj: Any, size: int = 16) -> str:
+    """
+    generate a hash as string from an object. the hash is generated using SHA1 encode as base 32 but only
+    keeping the last 16 characters by default. it uses base32 encoding so can be used safely in filename or in URL
+    without additional needs of encoding not character escaping
+       - last 16:
+
+    :param obj: obj compute the hash from
+    :param size: truncate length to the size provided. Default is 16, maximum is 32, minimal is 8.
+        this is useful to reduce the number of characters and avoid potential storage limitation. It remains valid as
+        it will be between few items, at maximum few thousands, then the collision likelihood is infinitesimal
+    :return: hash as string
     """
 
     obj_bytes = pickle.dumps(obj, 5)
-    return base64.b32encode(hashlib.sha1(obj_bytes).digest()).decode()[:-16]
-
-
-# TODO [TAG pandas dependent]
-def generate_chunk_filename(dataframe: pd.DataFrame) -> str:
-    return _generate_chunk_filename_v1(dataframe)
-
-
-# TODO [TAG pandas dependent]
-def _generate_chunk_filename_v2(dataframe: pd.DataFrame) -> str:
-    """construct a filename with extension this way: {index_hash}.{shape_hash}:
-       - index_hash takes into account the first and last index value
-       - shape_hash takes into_account all column labels and types
-       This method is idempotent
-    Raises:
-        IndexError - if empty dataframe
-    """
-    first_idx, last_idx = dataframe.index[0], dataframe.index[-1]
-    shape_h = _obj_to_hash_str((dataframe.columns.values, dataframe.dtypes.values))
-    index_h = _obj_to_hash_str((first_idx, last_idx))
-    return index_h + "." + shape_h
-
-
-# TODO [TAG pandas dependent]
-def _generate_chunk_filename_v1(dataframe: pd.DataFrame) -> str:
-    """Generate a chunk filename composed of information from the given dataframe
-    {first_index}_{last_index}_{time}.{shape}
-    The shape is a hash of columns names + columns dtypes
-    If chunks have same shape, dask can read them together.
-
-    Warnings:
-        - This funtion is NOT idempotent !
-        - Do not modify the name without updating the class SessionFileMeta !
-          Indeed, SessionFileMeta parse information from the chunk filename
-        - Filenames impacts partitions order in Dask as it order them by 'natural key'
-          Thats why the start index is in the first position
-
-    Raises:
-        IndexError - if empty dataframe
-
-    >>> _generate_chunk_filename(pd.DataFrame({'A': range(10), 'B': range(10)}, index=range(10)))
-    '0_9_1637223437910.526782c41fe12c3249046fedcc45563ef3662250'
-    >>> _generate_chunk_filename(pd.DataFrame({'A': range(10), 'B': range(10)}, index=range(10,20)))
-    '10_19_1637223490719.526782c41fe12c3249046fedcc45563ef3662250'
-    >>> _generate_chunk_filename(pd.DataFrame({'A': [1], 'B': [1]}, index=[datetime.datetime.now()]))
-    '1639672097644401000_1639672097644401000_1639668497645.526782c41fe12c3249046fedcc45563ef3662250'
-    >>> _generate_chunk_filename(pd.DataFrame({'A': []}, index=[]))
-    IndexError: index 0 is out of bounds for axis 0 with size 0
-    """
-    first_idx, last_idx = dataframe.index[0], dataframe.index[-1]
-    if isinstance(dataframe.index, pd.DatetimeIndex):
-        first_idx, last_idx = dataframe.index[0].value, dataframe.index[-1].value
-
-    shape_str = "_".join(f"{cn}:{dt}" for cn, dt in dataframe.dtypes.items())
-    shape = hashlib.sha1(shape_str.encode()).hexdigest()
-    cur_time = round(time.time() * 1000)
-    return f"{first_idx}_{last_idx}_{cur_time}.{shape}"
-
-
-index_reg = r"[+-]?\d+(\.\d*)?"  # it can be an integer or a float
-CHUNK_FILENAME_REGEX = compile(rf"^{index_reg}_{index_reg}_\d+(\.).+$")
-CHUNK_FILENAME_REGEX_V2 = compile(r"^(\w){16}(\.)(\w){16}(\.).+$")
-
-
-def is_a_chunk_file(filepath) -> bool:
-    # TODO to review, for now only to distinguish multi part/file chunk resulting of a chunk conflict resolution
-    #  and saved by Dask. It might be more efficient in main cases (no conflict) to do this only if load of chunk
-    #  failed (speed favors no conflict case). Eventually with the removal of Dask and chunk massaging, these
-    #  cases will become rarer.
-    filename = basename(filepath)
-    return CHUNK_FILENAME_REGEX_V2.match(filename) is not None or CHUNK_FILENAME_REGEX.match(filename) is not None
+    full_hash = base64.b32encode(hashlib.sha1(obj_bytes).digest()).decode()
+    if size > 31:
+        return full_hash
+    return full_hash[: max(8, size)]
 
 
 def join(path, *paths) -> str:
@@ -165,6 +99,10 @@ def join(path, *paths) -> str:
 
 def basename(path) -> str:
     return os_path_basename(path)
+
+
+def split_path(path) -> Tuple[str, str]:
+    return os_path_split(path)
 
 
 def record_path_level_0(record_id: str, *, base_directory: str | None = None) -> str:
@@ -208,8 +146,13 @@ def catalog_file_path(record_id: str, bulk_id: str, *, base_directory: str | Non
     return join(folder_path, "bulk_catalog.json")
 
 
-# TODO try to delete this function if possible to avoid misleading around path construction
-def record_relative_path_TO_DELETE(record_id: str, path: str, *, base_directory: str | None = None) -> str:
+def relpath(path, start) -> str:
+    # enforce usage of '/' as it remains compatible with all known usage so far: Windows 10+ or Linux fs, ffspec,
+    # real blob storage and blob storage emulator (e.g. Azurite)
+    return os_path_relpath(path, start).replace("\\", "/")
+
+
+def record_relative_path(record_id: str, path: str, *, base_directory: str | None = None) -> str:
     """Returns the path relative to the specified record."""
     base_path = record_path_level_0(record_id, base_directory=base_directory)
-    return relpath(path, base_path).replace("\\", "/")
+    return relpath(path, base_path)

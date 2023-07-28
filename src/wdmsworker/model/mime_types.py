@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from os.path import splitext
 from typing import Generator, List, NamedTuple
 
 
@@ -30,21 +31,41 @@ class MimeType(NamedTuple):
             (normalized_value == a_type for a_type in [self.type] + self.alternative_types)
         ) or normalized_value.replace(".", "") == self.extension.replace(".", "")
 
+    def match_extension(self, filename) -> bool:
+        return filename.lower().endswith(self.extension)
+
+    def add_extension(self, filename: str) -> str:
+        if self.extension.startswith("."):
+            extension = self.extension
+        else:
+            extension = "." + self.extension
+        if filename.endswith(extension):
+            return filename
+        return filename + extension
+
+    def replace_extension(self, filename, old: "MimeType") -> str:
+        if filename.endswith(old.extension):
+            filename = splitext(filename)[0]
+        return self.add_extension(filename)
+
 
 class MimeTypes:
     """
     define mime types used in the application
     Note: May be use https://docs.python.org/3/library/mimetypes.html
-        mimetypes.add_type('application/x-parquet', '.parquet')
+        mimetypes.add_type('application/x-parquet', 'parquet')
     """
 
     PARQUET = MimeType(
         type="application/x-parquet",
-        extension=".parquet",
+        extension="parquet",
         alternative_types=["application/parquet"],
     )  # because https://tools.ietf.org/html/rfc6838#section-3.4
 
-    JSON = MimeType(type="application/json", extension=".json")
+    JSON = MimeType(type="application/json", extension="json")
+
+    # json formatted meta data
+    META = MimeType(type="application/meta", extension="meta")
 
     ANY = MimeType(type="*/*", extension="")
 

@@ -14,13 +14,25 @@
 
 import numpy as np
 
-# TODO [TAG pandas dependent]
 import pandas as pd
 
 
-def generate_df(columns, index):
-    def gen_values(col_name, size):
+def generate_df(columns, index, reference: str | None = None) -> pd.DataFrame:
+    """
+    generate a dataframe with random values of the type requested. if `reference` provided, the corresponding values
+    produced are monotonic increasing instead of random
+    :param columns: list of column labels, if starts with `float`, `str`, `bool`, `date`, values are generated
+                    in the respective type. If starts with `array` then it generates `float` values. Default is `int`
+    :param index: index values
+    :param reference: reference curve name, corresponding values will be increasing between index edges. Type must be
+                      `float`, `int` or `date`. By default generates `int` values.
+    """
+    index_values = list(index)
+
+    def gen_values(col_name, size, monotonic):
         if col_name.startswith("float"):
+            if monotonic:
+                return np.linspace(float(index_values[0]), float(index_values[-1]), size, endpoint=False)
             return np.random.random_sample(size=size)
         if col_name.startswith("str"):
             return [f"string_value_{i}" for i in range(size)]
@@ -32,9 +44,11 @@ def generate_df(columns, index):
             array_size = int(col_name.split("_")[1])
             return [np.array(np.random.random_sample(size=array_size)) for _i in range(size)]
 
+        if monotonic:
+            return index_values
         return np.random.randint(-100, 1000, size=size)
 
-    return pd.DataFrame({c: gen_values(c, len(index)) for c in columns}, index=index)
+    return pd.DataFrame({c: gen_values(c, len(index_values), c == reference) for c in columns}, index=index_values)
 
 
 def assert_frame_equal(left, right, check_column_order=True):
@@ -49,3 +63,39 @@ def assert_frame_equal(left, right, check_column_order=True):
         right = right[l_columns]  # re order columns
 
     pd.testing.assert_frame_equal(left, right)
+
+
+def generate_date_range(size):
+    return pd.date_range(start="1/1/2022", freq="s", periods=size)
+
+
+def generate_df_dtype(columns: dict, index, reference: str | None = None) -> pd.DataFrame:
+    """
+    generate a dataframe with random values of the type requested. if `reference` provided, the corresponding values
+    produced are monotonic increasing instead of random
+
+    :param columns: dictionary `{column_label: value_type}`
+    :param index: index values
+    :param reference: reference curve name, corresponding values will be increasing between index edges. Type must be
+                      `float`, `int` or `date`. By default generates `int` values.
+    """
+    index_values = list(index)
+
+    def gen_values(dtype, size, monotonic):
+        if dtype == "float":
+            if monotonic:
+                return np.linspace(float(index_values[0]), float(index_values[-1]), size, endpoint=False)
+            return np.random.random_sample(size=size)
+        if dtype == "str":
+            return [f"string_value_{i}" for i in range(size)]
+        if dtype == "bool":
+            return np.random.choice(a=[False, True], size=size)
+        if dtype == "datetime":
+            return generate_date_range(size)
+        if monotonic:
+            return index_values
+        return np.random.randint(-100, 1000, size=size)
+
+    return pd.DataFrame(
+        {c: gen_values(d, len(index_values), c == reference) for c, d in columns.items()}, index=index_values
+    )

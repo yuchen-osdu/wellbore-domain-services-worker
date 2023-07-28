@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Dict
+from typing import Dict, Tuple, Any
 from enum import Enum
 
 import pandas as pd
@@ -24,6 +24,14 @@ WDMS_INDEX_NAME = "_wdms_index_"
 class Monotonicity(str, Enum):
     Increasing = "increasing"
     Decreasing = "decreasing"
+
+    @classmethod
+    def from_series(cls, series: pd.Series):
+        if series.is_monotonic_increasing:
+            return Monotonicity.Increasing
+        if series.is_monotonic_decreasing:
+            return Monotonicity.Decreasing
+        return None
 
 
 DataframeDictSplit = Dict
@@ -73,12 +81,15 @@ class ColumnDescribe(BaseModel):
             df[self.name].astype(self.dataType, copy=False)
         return df
 
+    def start_end_values(self) -> Tuple[Any, Any]:
+        return self.start_end_df()[self.name].values.tolist()
+
     @classmethod
     def _from_dataframe(cls, df: pd.DataFrame, name: str, *other_columns_to_include) -> "ColumnDescribe":
         if not name or name not in df:
             name = WDMS_INDEX_NAME
 
-        if df.empty:
+        if df.empty and df.index.empty:
             # in that case, still produce an instance
             reduced_df = df
             column_series = pd.Series(dtype="object")
@@ -102,11 +113,7 @@ class ColumnDescribe(BaseModel):
         return cls(
             name=name,
             startEnd=reduced_df.to_dict("split"),
-            monotonicity=(
-                Monotonicity.Increasing
-                if column_series.is_monotonic_increasing
-                else Monotonicity.Decreasing if column_series.is_monotonic_decreasing else None
-            ),
+            monotonicity=Monotonicity.from_series(column_series),
             hasDuplicate=not column_series.is_unique,
             hasNan=column_series.hasnans,
             dataType=str(column_series.dtype),
