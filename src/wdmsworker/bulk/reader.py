@@ -12,26 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import asyncio
 from io import BytesIO
 from dataclasses import dataclass
 from typing import List, Tuple
 from itertools import repeat, chain
+from asyncio import gather, create_task
 
-# TODO [TAG pandas dependent]
 import pandas as pd
-
 from natsort import natsorted
 from osdu.core.api.storage.blob_storage_base import BlobStorageBase
+from osdu.core.api.storage import exceptions as blob_storage_errors
 
-from .filtering import ValueFilters, apply_bulk_filters
-from .read_errors import FilteringError
 from ..model.filtering_model import BulkFilters, IndexFilters
 from ..logger import get_logger
 from ..capture_timings import timeit, capture_timings
 from ..model.json_orient import JSONOrient
 from ..model.mime_types import MimeType, MimeTypes
-from . import read_errors
+from .chunk_meta import ChunkMeta
+from .filtering import ValueFilters, apply_bulk_filters
+from .errors import FilteringError
+from . import errors
 from . import constants
 
 from .catalog import BulkCatalog
@@ -48,14 +48,16 @@ from .dataframe import (
     dump_df,
 )
 
+# blob storage exception mapping
+bulk_error_mapping = {
+    blob_storage_errors.ResourceNotFoundException: errors.CurvesNotFoundError,
+}
+
 
 @dataclass(frozen=True, eq=False, repr=False)
 class ReadResult:
     content: bytes | str
     mime_type: MimeType
-
-
-LOAD_DATAFRAME_SEMAPHORE = asyncio.Semaphore(100)  # semaphore to not overwhelm the service
 
 
 def _dataframe_filters_and_reorder_columns(
@@ -94,22 +96,7 @@ def _dataframe_filters_and_reorder_columns(
     return filter_by_index(final_df, bulk_read_filters.index_filters.offset, bulk_read_filters.index_filters.limit)
 
 
-@capture_timings("read_bulk_outside_session")
-async def read_bulk_outside_session(
-    storage: BlobStorageBase,
-    tenant,
-    record_id: str,
-    bulk_id: str,
-    accept_type: MimeType,
-    orient: JSONOrient | None,
-    offset: int | None = None,
-    limit: int | None = None,
-    curves_selection: ColumnSelection | None = None,
-    filters_params: ValueFilters | None = None,
-    describe: bool | None = None,
-) -> ReadResult:
-    bulk_read_filters = _validate_parameters_no_catalog(offset, limit, None, filters_params)
-
+async def get_chunk_path_outside_session(storage: BlobStorageBase, tenant, record_id: str, bulk_id: str) -> str:
     base_chunk_path = storage_path_builder.bulk_path_level_1(record_id, bulk_id, base_directory=None)
     # need to perform a `ls` to know the parquet file
     chunk_paths = await storage.list_objects(tenant, prefix=storage_path_builder.join(base_chunk_path, ""))
@@ -127,14 +114,34 @@ async def read_bulk_outside_session(
                 f"cannot process {record_id} bulk_id {bulk_id}, multiple parquet files found without catalog,"
                 f" {len(chunk_paths)} partitions found"
             )
-            raise read_errors.ReadBulkCaseNotSupportedException("multiple chunks without catalog")
+            raise errors.BulkCaseNotSupportedError("multiple chunks without catalog")
 
     if len(chunk_paths) == 0:
         # last chance, it could be bulk stored with the very first storage, so direct single parquet file, no extension
         chunk_path = bulk_id
     else:
         chunk_path = chunk_paths[0]
+    return chunk_path
 
+
+@capture_timings("read_bulk_outside_session")
+@errors.map_errors(bulk_error_mapping)  # type: ignore
+async def read_bulk_outside_session(
+    storage: BlobStorageBase,
+    tenant,
+    record_id: str,
+    bulk_id: str,
+    accept_type: MimeType,
+    orient: JSONOrient | None,
+    offset: int | None = None,
+    limit: int | None = None,
+    curves_selection: ColumnSelection | None = None,
+    filters_params: ValueFilters | None = None,
+    describe: bool | None = None,
+) -> ReadResult:
+    bulk_read_filters = _validate_parameters_no_catalog(offset, limit, None, filters_params)
+
+    chunk_path = await get_chunk_path_outside_session(storage, tenant, record_id, bulk_id)
     if curves_selection is None:
         # non curves filter
         return await _build_response_from_single_chunk(
@@ -153,6 +160,7 @@ async def read_bulk_outside_session(
     return await _build_response_from_df(df, accept_type, orient)
 
 
+@errors.map_errors(bulk_error_mapping)  # type: ignore
 async def read_bulk(
     storage: BlobStorageBase,
     tenant,
@@ -225,10 +233,10 @@ async def read_bulk(
 
     # not putting offset, limit here because each chunk may not cover the full bulk index
     # by the way it might be possible to do something before concat
-    index_df_task = asyncio.create_task(_read_index(storage, tenant, bulk_catalog))
+    index_df_task = create_task(_read_index(storage, tenant, bulk_catalog))
 
     load_chunk_df_coros = [
-        _load_same_shape_dataframes_from_storage(
+        load_same_shape_dataframes_from_storage(
             storage,
             tenant,
             [storage_path_builder.join(base_chunk_path, p) for p in chunk_group.paths],
@@ -238,14 +246,14 @@ async def read_bulk(
     ]
 
     with timeit(f"load {len(chunk_groups)} chunk dataframes and index dataframes"):
-        dfs = await asyncio.gather(*load_chunk_df_coros)  # chunks
+        dfs = await gather(*load_chunk_df_coros)  # chunks
 
-    index_df = await index_df_task
+    global_index = await index_df_task
 
     # concat df + select rows if needed
     with timeit(f"concat {len(dfs)} dataframes"):
         # TODO check concat when dfs are smaller than index
-        final_df = pd.concat(chain(repeat(index_df, 1), dfs), axis=1, copy=False)
+        final_df = pd.concat(chain(repeat(pd.DataFrame(index=global_index), 1), dfs), axis=1, copy=False)
 
     # drop extra columns, reorder columns if needed, then apply values filters and index filters
     final_df = _dataframe_filters_and_reorder_columns(final_df, describe_filter or bulk_read_filters)
@@ -305,7 +313,7 @@ def _validate_parameters(
     try:
         index_filters = IndexFilters(offset, limit)
     except ValueError as e:
-        raise read_errors.ReadBulkInvalidParameter from e
+        raise errors.InvalidParameterError from e
 
     any_curves_array = None
     # ---------- first check if fast track can be applied -----------------------------
@@ -315,10 +323,10 @@ def _validate_parameters(
             curves_selection, bulk_catalog.all_columns
         )
         if curves_non_existent:
-            raise read_errors.BulkCurvesNotFound(f"curves={curves_non_existent}")
+            raise errors.CurvesNotFoundError(f"curves={curves_non_existent}")
     else:
         if len(bulk_catalog.all_columns) > constants.READ_MAX_COLUMNS_COUNT:
-            raise read_errors.TooManyColumnsRequested(len(bulk_catalog.all_columns), constants.READ_MAX_COLUMNS_COUNT)
+            raise errors.TooManyColumnsError(len(bulk_catalog.all_columns), constants.READ_MAX_COLUMNS_COUNT)
         requested_columns = natsorted(bulk_catalog.all_columns)
 
     extra_filtering_cols = set()
@@ -333,14 +341,12 @@ def _validate_parameters(
 
     # validate the column count requested
     if len(requested_columns) > constants.READ_MAX_COLUMNS_COUNT:
-        raise read_errors.TooManyColumnsRequested(len(requested_columns), constants.READ_MAX_COLUMNS_COUNT)
+        raise errors.TooManyColumnsError(len(requested_columns), constants.READ_MAX_COLUMNS_COUNT)
 
     # validate the values count before any filtering
     total_values_unfiltered = bulk_catalog.nb_rows * len(requested_columns)
     if total_values_unfiltered > constants.READ_MAX_TOTAL_VALUES_COUNT_UNFILTERED:
-        raise read_errors.TooManyValuesRequested(
-            total_values_unfiltered, constants.READ_MAX_TOTAL_VALUES_COUNT_UNFILTERED
-        )
+        raise errors.TooManyValuesError(total_values_unfiltered, constants.READ_MAX_TOTAL_VALUES_COUNT_UNFILTERED)
 
     # validate the values after filtering
     filtered_row_count = index_filters.row_count(bulk_catalog.nb_rows)
@@ -349,7 +355,7 @@ def _validate_parameters(
     total_values_filtered = filtered_row_count * len(requested_columns)
 
     if total_values_filtered > constants.READ_MAX_TOTAL_VALUES_COUNT_FILTERED:
-        raise read_errors.TooManyValuesRequested(total_values_filtered, constants.READ_MAX_TOTAL_VALUES_COUNT_FILTERED)
+        raise errors.TooManyValuesError(total_values_filtered, constants.READ_MAX_TOTAL_VALUES_COUNT_FILTERED)
 
     columns_to_load = [*requested_columns, *extra_filtering_cols]
 
@@ -362,7 +368,6 @@ def _validate_parameters(
     )
 
 
-# TODO [TAG pandas dependent]
 # @capture_timings('_build_response_from_df')
 async def _build_response_from_df(df: pd.DataFrame, accept_type: MimeType, orient: JSONOrient | None) -> ReadResult:
     """serialize the dataframe into parquet and construct the http response"""
@@ -373,19 +378,18 @@ async def _build_response_from_df(df: pd.DataFrame, accept_type: MimeType, orien
             content = dump_df(df, accept_type, orient)
             return ReadResult(content, accept_type)
         except ValueError as e:
-            raise read_errors.ReadBulkNotProcessable() from e
+            raise errors.BulkUnprocessableError() from e
 
 
 async def _load_single_dataframe_from_storage(storage: BlobStorageBase, tenant, obj_path: str, columns_to_load=None):
     """download and load a single dataframe selecting columns, and index based by position if offset and/or
     limit are provided"""
     # limit the concurrency to not overwhelm the service
-    async with LOAD_DATAFRAME_SEMAPHORE:
-        with timeit("download dataframe from storage"):
-            content = await storage.download(tenant, obj_path)
-        with timeit("loading parquet from dataframe"):
-            content = BytesIO(content)
-            return pd.read_parquet(content, columns=columns_to_load)
+    with timeit("download dataframe from storage"):
+        content = await storage.download(tenant, obj_path)
+    with timeit("loading parquet from dataframe"):
+        content = BytesIO(content)
+        return pd.read_parquet(content, columns=columns_to_load)
 
 
 async def _expand_chunk_paths(
@@ -401,7 +405,7 @@ async def _expand_chunk_paths(
     """
     result = []
     for p in obj_paths:
-        if storage_path_builder.is_a_chunk_file(p):
+        if ChunkMeta.is_a_chunk_file(p):
             result.append(p)
         else:
             get_logger().debug(f"dask multipart detected for path {p}")
@@ -413,10 +417,8 @@ async def _expand_chunk_paths(
     return result
 
 
-# TODO [TAG pandas dependent]
-# TODO [TAG synchronous CPU bound operation]
-# @capture_timings('_load_same_shape_dataframes_from_storage')
-async def _load_same_shape_dataframes_from_storage(
+# @capture_timings('load_same_shape_dataframes_from_storage')
+async def load_same_shape_dataframes_from_storage(
     storage: BlobStorageBase,
     tenant,
     obj_paths: List[str],
@@ -431,9 +433,7 @@ async def _load_same_shape_dataframes_from_storage(
     # TODO could save the download and load of dataframe if we'd have a way to know the start/end of each chunk
 
     obj_paths = await _expand_chunk_paths(storage, tenant, obj_paths)
-    dfs = await asyncio.gather(
-        *[_load_single_dataframe_from_storage(storage, tenant, path, columns) for path in obj_paths]
-    )
+    dfs = await gather(*[_load_single_dataframe_from_storage(storage, tenant, path, columns) for path in obj_paths])
 
     # Note when concatenating of rows, order matters
     df = dfs[0] if len(dfs) == 1 else pd.concat(dfs, axis=0, copy=False)
@@ -441,14 +441,15 @@ async def _load_same_shape_dataframes_from_storage(
 
 
 # @capture_timings('_read_index')
-async def _read_index(storage: BlobStorageBase, tenant, bulk_catalog: BulkCatalog) -> pd.DataFrame:
+async def _read_index(storage: BlobStorageBase, tenant, bulk_catalog: BulkCatalog) -> pd.Index:
     if not bulk_catalog.index_path:
         get_logger().warning(f"not index file for record {bulk_catalog.record_id}")
-        return pd.DataFrame()
+        return pd.Index([])
     index_path = storage_path_builder.join(
         storage_path_builder.record_path_level_0(bulk_catalog.record_id, base_directory=None), bulk_catalog.index_path
     )
-    return await _load_single_dataframe_from_storage(storage, tenant, index_path)
+    index_df = await _load_single_dataframe_from_storage(storage, tenant, index_path)
+    return index_df.index
 
 
 async def _build_response_from_single_chunk(

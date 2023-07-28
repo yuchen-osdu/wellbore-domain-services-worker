@@ -19,7 +19,7 @@ from typing import List
 import re
 
 from ..model.filtering_model import BulkValueFilterOperator, BulkValueFilter, ValueFilters
-from .read_errors import FilteringError
+from .errors import FilteringError
 
 
 def apply_bulk_filters(dataframe, filters: ValueFilters):

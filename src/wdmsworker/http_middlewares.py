@@ -75,6 +75,16 @@ def _add_request_attributes_to_span(request, response, span):
         attribute_value=request.headers.get(constants.REQUEST_ID_HEADER_NAME),
     )
 
+    span.add_attribute(
+        attribute_key=constants.X_USER_ID_HEADER_NAME,
+        attribute_value=request.headers.get(constants.X_USER_ID_HEADER_NAME),
+    )
+
+    span.add_attribute(
+        attribute_key=constants.APP_ID_HEADER_NAME,
+        attribute_value=request.headers.get(constants.APP_ID_HEADER_NAME),
+    )
+
     span.add_attribute(attribute_key=COMMON_ATTRIBUTES["HTTP_METHOD"], attribute_value=request.method)
     span.add_attribute(attribute_key=COMMON_ATTRIBUTES["HTTP_ROUTE"], attribute_value=request.url.path)
     span.add_attribute(attribute_key=COMMON_ATTRIBUTES["HTTP_URL"], attribute_value=str(request.url))
@@ -82,7 +92,10 @@ def _add_request_attributes_to_span(request, response, span):
     response_status = response.status_code if response else HTTP_500_INTERNAL_SERVER_ERROR
     span.add_attribute(attribute_key=COMMON_ATTRIBUTES["HTTP_STATUS_CODE"], attribute_value=response_status)
 
-    # # this field is filled only after request is performed
+    response_content_length = response.headers.get("Content-Length") if response else None
+    span.add_attribute(attribute_key="response.header Content-length", attribute_value=response_content_length)
+
+    # this field is filled only after request is performed
     if request.scope.get("route"):
         span.add_attribute(
             attribute_key=COMMON_ATTRIBUTES["HTTP_ROUTE"], attribute_value=request.scope.get("route").path

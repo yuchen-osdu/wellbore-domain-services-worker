@@ -16,7 +16,6 @@ import asyncio
 from io import BytesIO
 import uuid
 
-# TODO [TAG pandas dependent]
 import pandas as pd
 from natsort import natsorted
 import pyarrow.parquet as pq
@@ -29,27 +28,28 @@ from unittest.mock import AsyncMock, Mock
 
 from pandas.testing import assert_frame_equal
 
+from wdmsworker.bulk.chunk_meta import ChunkMeta
 from wdmsworker.bulk.dataframe import filter_by_index
 from wdmsworker.model.filtering_model import BulkValueFilter
-from ..generate_data import generate_df, generate_df_dtype
+from ..generate_data import generate_df, generate_df_dtype, assert_dataframe_from_content
 
 from wdmsworker.bulk.filtering import BulkValueFilterOperator, ValueFilters
 from wdmsworker.bulk import storage_path_builder
-from wdmsworker.bulk.storage_path_builder import join, is_a_chunk_file
+from wdmsworker.bulk.storage_path_builder import join
 from wdmsworker.bulk.catalog import BulkCatalog, BulkCatalogOrigin, ChunkGroup
-from wdmsworker.bulk.read_errors import (
-    TooManyColumnsRequested,
-    TooManyValuesRequested,
-    ReadBulkInvalidParameter,
-    BulkCurvesNotFound,
-    ReadBulkCaseNotSupportedException,
+from wdmsworker.bulk.errors import (
+    TooManyColumnsError,
+    TooManyValuesError,
+    InvalidParameterError,
+    CurvesNotFoundError,
+    BulkCaseNotSupportedError,
 )
 from wdmsworker.bulk.reader import (
     read_bulk,
     read_bulk_outside_session,
     _forward_parquet,
     _build_response_from_df,
-    _load_same_shape_dataframes_from_storage,
+    load_same_shape_dataframes_from_storage,
     _build_response_from_describe,
 )
 from wdmsworker.model.json_orient import JSONOrient
@@ -61,19 +61,6 @@ format_params = [
 ]
 
 describe_params = [False, True]
-
-
-def assert_dataframe_from_content(expected_df, content, accept_type, orient):
-    if accept_type == MimeTypes.PARQUET:
-        actual_df = pd.read_parquet(BytesIO(content))
-    else:
-        actual_df = pd.read_json(content, orient=orient.value)
-    if expected_df.empty and actual_df.empty:
-        # corner case, when there's no row, just checking columns
-        assert list(expected_df.columns) == list(actual_df.columns)
-    else:
-        assert_frame_equal(expected_df, actual_df, check_dtype=accept_type == MimeTypes.PARQUET)
-    # check_dtype to False as json may lose strict type
 
 
 def assert_describe_from_content(expected_df, response):
@@ -187,15 +174,15 @@ async def test_load_same_shape_dataframes_from_storage_single(value_type):
         "tenant": Mock(),
         "obj_paths": [fake_chunk_name("parquet")],
     }
-    actual_df = await _load_same_shape_dataframes_from_storage(**cmn_kwargs)
+    actual_df = await load_same_shape_dataframes_from_storage(**cmn_kwargs)
     assert_frame_equal(df, actual_df)
 
-    assert_frame_equal(df[["A", "B"]], await _load_same_shape_dataframes_from_storage(**cmn_kwargs, columns=["A", "B"]))
+    assert_frame_equal(df[["A", "B"]], await load_same_shape_dataframes_from_storage(**cmn_kwargs, columns=["A", "B"]))
 
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("value_type", ["int", "float"])
-async def test_load_same_shape_dataframes_from_storage_horizontal_slices(value_type):
+async def testload_same_shape_dataframes_from_storage_horizontal_slices(value_type):
     chunks = {
         fake_chunk_name("df1"): generate_df(["B", "C", "A"], index=range(6)),
         fake_chunk_name("df2"): generate_df(["B", "C", "A"], index=range(6, 10)),
@@ -211,23 +198,27 @@ async def test_load_same_shape_dataframes_from_storage_horizontal_slices(value_t
     storage_mock.download = download_mock
 
     cmn_kwargs = {"storage": storage_mock, "tenant": Mock(), "obj_paths": list(chunks.keys())}
-    actual_df = await _load_same_shape_dataframes_from_storage(**cmn_kwargs)
+    actual_df = await load_same_shape_dataframes_from_storage(**cmn_kwargs)
     assert_frame_equal(df, actual_df)
 
-    assert_frame_equal(df[["A", "B"]], await _load_same_shape_dataframes_from_storage(**cmn_kwargs, columns=["A", "B"]))
+    assert_frame_equal(df[["A", "B"]], await load_same_shape_dataframes_from_storage(**cmn_kwargs, columns=["A", "B"]))
 
 
-@pytest.mark.anyio
 @pytest.mark.parametrize("data_type_name", ["int", "float", "date"])
-async def test_generate_chunk_filename(data_type_name):
-    # todo: add proper way to verify when values are negative,
-    #  even it is partially tested by random data that can be negative
+def test_generate_chunk_filename(data_type_name):
     cols = [f"{data_type_name}-{i}" for i in range(2)]
     df = generate_df(cols, index=range(10))
     df = df.set_index(cols[0])
 
-    chunk_name = storage_path_builder.generate_chunk_filename(df) + ".parquet"
-    assert is_a_chunk_file(chunk_name)
+    chunk_name = ChunkMeta.generate_filename(df) + ".parquet"
+    assert ChunkMeta.is_a_chunk_file(chunk_name)
+
+    if data_type_name in ["int", "float"]:
+        neg_col = "neg_" + cols[1]
+        df[neg_col] = df[cols[1]].multiply(-1)
+        df = df.set_index(neg_col)
+        chunk_name = ChunkMeta.generate_filename(df) + ".parquet"
+        assert ChunkMeta.is_a_chunk_file(chunk_name)
 
 
 @pytest.mark.anyio
@@ -238,12 +229,12 @@ async def test_load_dataframe_from_storage_many_columns():
     df = generate_df([f"c{i}" for i in range(10)], index=range(10))
     storage_mock = Mock()
     storage_mock.download = AsyncMock(return_value=df.to_parquet(index=True))
-    chunk_name = storage_path_builder.generate_chunk_filename(df) + ".parquet"
-    actual_df = await _load_same_shape_dataframes_from_storage(storage_mock, Mock(), [chunk_name])
+    chunk_name = ChunkMeta.generate_filename(df) + ".parquet"
+    actual_df = await load_same_shape_dataframes_from_storage(storage_mock, Mock(), [chunk_name])
     assert_frame_equal(df, actual_df)
 
     cols_requested = cols[2:]
-    actual_df = await _load_same_shape_dataframes_from_storage(storage_mock, Mock(), [chunk_name], cols_requested)
+    actual_df = await load_same_shape_dataframes_from_storage(storage_mock, Mock(), [chunk_name], cols_requested)
     assert_frame_equal(df[cols_requested], actual_df)
 
 
@@ -252,7 +243,7 @@ async def test_unsupported_cases_raise():
     supported_format = MimeTypes.PARQUET
 
     # negative limit
-    with pytest.raises(ReadBulkInvalidParameter):
+    with pytest.raises(InvalidParameterError):
         catalog = BulkCatalog("", origin=BulkCatalogOrigin.from_file())
         await read_bulk(AsyncMock(), Mock(), catalog, supported_format, None, limit=-1)
 
@@ -260,36 +251,36 @@ async def test_unsupported_cases_raise():
 @pytest.mark.anyio
 async def test_request_too_many_column_raise():
     catalog = BulkCatalog("", origin=BulkCatalogOrigin.generated_from_bulk())
-    catalog.add_chunk(ChunkGroup({f"C[{i}]" for i in range(5001)}, ["path1"], []))
+    catalog.add_chunk(ChunkGroup({f"C[{i}]" for i in range(5001)}, ["path1"]))
     args = [AsyncMock(), Mock(), catalog, MimeTypes.PARQUET, None]
 
     # read all
-    with pytest.raises(TooManyColumnsRequested):
+    with pytest.raises(TooManyColumnsError):
         await read_bulk(*args, curves_selection=None)
 
     # read 3000+ columns
     curve_selection = [f"C[{i}]" for i in range(1000, 4001)]
-    with pytest.raises(TooManyColumnsRequested):
+    with pytest.raises(TooManyColumnsError):
         await read_bulk(*args, curves_selection=curve_selection)
 
     # read 3000+ columns even with limit
-    with pytest.raises(TooManyColumnsRequested):
+    with pytest.raises(TooManyColumnsError):
         await read_bulk(*args, curves_selection=curve_selection, offset=10, limit=1)
 
 
 @pytest.mark.anyio
 async def test_request_too_many_values_raise():
     catalog = BulkCatalog("", origin=BulkCatalogOrigin.generated_from_bulk())
-    catalog.add_chunk(ChunkGroup({f"C[{i}]" for i in range(100)}, ["path1"], []))
+    catalog.add_chunk(ChunkGroup({f"C[{i}]" for i in range(100)}, ["path1"]))
     catalog.nb_rows = 100_000_000
     args = [AsyncMock(), Mock(), catalog, MimeTypes.PARQUET, None]
 
     # request 6M
-    with pytest.raises(TooManyValuesRequested):
+    with pytest.raises(TooManyValuesError):
         await read_bulk(*args, curves_selection=[f"C[{i}]" for i in range(6)])
 
     # request 4M but need to work on a 100M dataframe
-    with pytest.raises(TooManyValuesRequested):
+    with pytest.raises(TooManyValuesError):
         await read_bulk(*args, limit=40_000)
 
 
@@ -529,7 +520,7 @@ async def test_read_bulk_old_dask_storage_unsupported_case(bulk_storage_mock: Bl
     await bulk_storage_mock.upload(test_tenant, join(bulk_base_path, "part.0.parquet"), BytesIO(b"part0"))
     await bulk_storage_mock.upload(test_tenant, join(bulk_base_path, "part.1.parquet"), BytesIO(b"part1"))
 
-    with pytest.raises(ReadBulkCaseNotSupportedException):
+    with pytest.raises(BulkCaseNotSupportedError):
         await read_bulk_outside_session(bulk_storage_mock, test_tenant, record_id, bulk_id, MimeTypes.PARQUET, None)
 
 
@@ -767,42 +758,6 @@ async def test_read_bulk_shifted_multi_chunk_case(
     )
 
 
-call_count = 0
-
-
-@pytest.mark.anyio
-async def test_load_dataframe_concurrency_is_limited():
-    sync_event = asyncio.Event()
-    data = pd.DataFrame().to_parquet(index=True)
-    global call_count
-    call_count = 0
-
-    async def download_mock(*_, **__):
-        global call_count
-        call_count = call_count + 1
-        await asyncio.wait_for(sync_event.wait(), 10)
-        return data
-
-    storage_mock = Mock()
-    storage_mock.download = download_mock
-
-    tasks = [
-        asyncio.create_task(_load_same_shape_dataframes_from_storage(storage_mock, Mock(), [fake_chunk_name("pa")]))
-        for _ in range(250)
-    ]
-    await asyncio.sleep(1)
-
-    # only 100 download should been started
-    assert call_count == 100
-
-    # release them all
-    sync_event.set()
-    await asyncio.wait_for(asyncio.gather(*tasks), 10)
-
-    # all completed
-    assert call_count == 250
-
-
 # ----------------------------------------------------------------------------------------------------------------
 # ----------------------------------------------------------------------------------------------------------------
 # ----------------------------------------------------------------------------------------------------------------
@@ -813,7 +768,7 @@ async def test_load_dataframe_concurrency_is_limited():
 
 
 def fake_chunk_name(suffix):
-    return "0000000000000000.0000000000000000." + suffix
+    return "000000000000.000000000000." + suffix
 
 
 def split_bulk_into_chunk(method: str):
@@ -885,15 +840,13 @@ async def store_chunks(
         chunk_paths = []
         columns = set()
         for df in chunks:
-            chunk_relative_path = join(
-                relative_base_path, storage_path_builder.generate_chunk_filename(df) + ".parquet"
-            )
+            chunk_relative_path = join(relative_base_path, ChunkMeta.generate_filename(df) + ".parquet")
             chunk_full_path = join(level_0_path, chunk_relative_path)
             await storage.upload(tenant, chunk_full_path, df.to_parquet(None, index=True))
             chunk_paths.append(chunk_relative_path)
             columns.update(df.columns)
 
-        catalog.add_chunk(ChunkGroup(columns, chunk_paths, []))
+        catalog.add_chunk(ChunkGroup(columns, chunk_paths))
     return catalog
 
 
@@ -997,11 +950,11 @@ async def assert_read_multicases(assert_read_fn, reference_df, **common_kwargs):
     )
 
     # WHEN asking no existing column
-    with pytest.raises(BulkCurvesNotFound):
+    with pytest.raises(CurvesNotFoundError):
         await assert_read_fn(**common_kwargs, expected_df=None, columns=["Z"])
 
     # WHEN asking no existing column
-    with pytest.raises(BulkCurvesNotFound):
+    with pytest.raises(CurvesNotFoundError):
         await assert_read_fn(**common_kwargs, expected_df=None, columns=["F[2:4]"])
 
     bulk_filters = [

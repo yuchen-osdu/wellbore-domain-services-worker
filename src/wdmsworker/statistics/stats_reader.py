@@ -22,7 +22,7 @@ from osdu.core.api.storage.tenant import Tenant
 from wdmsworker.bulk import storage_path_builder
 from wdmsworker.bulk.catalog import BulkCatalog
 from wdmsworker.bulk.reader import (
-    _load_same_shape_dataframes_from_storage,
+    load_same_shape_dataframes_from_storage,
     _read_index,
 )
 from wdmsworker.capture_timings import timeit
@@ -43,7 +43,7 @@ async def read_bulk_for_stats(
     index_df_task = asyncio.create_task(_read_index(storage, tenant, bulk_catalog))
 
     load_chunk_df_coros = [
-        _load_same_shape_dataframes_from_storage(
+        load_same_shape_dataframes_from_storage(
             storage,
             tenant,
             [storage_path_builder.join(base_chunk_path, p) for p in chunk_group.paths],
@@ -60,6 +60,6 @@ async def read_bulk_for_stats(
     # concat df + select rows if needed
     with timeit(f"concat {len(dfs)} dataframes"):
         # TODO check concat when dfs are smaller than index
-        final_df = pd.concat(chain(repeat(index_df, 1), dfs), axis=1, copy=False)
+        final_df = pd.concat(chain(repeat(pd.DataFrame(index=index_df), 1), dfs), axis=1, copy=False)
 
     return final_df

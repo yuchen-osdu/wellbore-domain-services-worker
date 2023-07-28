@@ -17,7 +17,7 @@ from dataclasses import dataclass
 import operator
 from typing import Iterable, List, Set, NamedTuple, Dict
 
-from wdmsworker.bulk.read_errors import FilteringError
+from wdmsworker.bulk.errors import FilteringError
 
 
 class BulkValueFilterOperator(str, Enum):
