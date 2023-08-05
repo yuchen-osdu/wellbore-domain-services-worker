@@ -12,18 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-Module dataframe manipulation functions
-"""
+""" Module dataframe manipulation functions """
 
 import re
 from contextlib import suppress
 from typing import Iterable, Dict, List, Tuple, Optional, Set
 from io import BytesIO
+from functools import partial
 
 from natsort import natsorted
 
-# TODO [TAG pandas dependent]
 import pandas as pd
 import numpy as np
 import pyarrow.parquet as pq
@@ -205,7 +203,6 @@ def sort_column_labels(column_labels: Iterable[str]) -> List[str]:
     return natsorted(column_labels)
 
 
-# TODO [TAG pandas dependent]
 def reorder_dataframe_columns(df: pd.DataFrame, curve_selection: List[str] | None) -> pd.DataFrame:
     """Reorder dataframe columns order according curve_selection if reordering is necessary"""
     if curve_selection and list(curve_selection) != df.columns.tolist():
@@ -214,14 +211,12 @@ def reorder_dataframe_columns(df: pd.DataFrame, curve_selection: List[str] | Non
     return df
 
 
-# TODO [TAG pandas dependent]
 def sort_dataframe_column(df: pd.DataFrame) -> pd.DataFrame:
     """Apply natural sorting on dataframe columns"""
     sorted_columns = sort_column_labels(df.columns)
     return reorder_dataframe_columns(df, sorted_columns)
 
 
-# TODO [TAG pandas dependent]
 def load_df(file_like_data, content_type: MimeType) -> pd.DataFrame:
     if isinstance(file_like_data, bytes):
         file_like_data = BytesIO(file_like_data)
@@ -234,7 +229,9 @@ def load_df(file_like_data, content_type: MimeType) -> pd.DataFrame:
     raise ValueError(f"unsupported content_type {content_type}")
 
 
-# TODO [TAG pandas dependent]
+load_parquet = partial(load_df, content_type=MimeTypes.PARQUET)
+
+
 def dump_df(df: pd.DataFrame, content_type: MimeType, orient: JSONOrient | None = None) -> bytes | str:
     if content_type == MimeTypes.PARQUET:
         try:
@@ -254,7 +251,9 @@ def dump_df(df: pd.DataFrame, content_type: MimeType, orient: JSONOrient | None 
     raise ValueError(f"unsupported content_type {content_type}")
 
 
-# TODO [TAG pandas dependent]
+dump_to_parquet = partial(dump_df, content_type=MimeTypes.PARQUET, orient=None)
+
+
 def to_parquet_v0(df: pd.DataFrame) -> bytes:
     # wdms v0 to parquet way, unlike pandas.to_parquet it allows columns values to be numerical. To be used only for
     # backward compatibility reasons
@@ -269,7 +268,6 @@ def to_parquet_v0(df: pd.DataFrame) -> bytes:
     return buffer.read()
 
 
-# TODO [TAG pandas dependent]
 def basic_describe(df: pd.DataFrame, reference_name: str | None) -> DataframeBasicDescribe:
     """
     Construct `DataframeBasicDescribe` object from a dataframe.
@@ -288,7 +286,6 @@ def basic_describe(df: pd.DataFrame, reference_name: str | None) -> DataframeBas
     )
 
 
-# TODO [TAG pandas dependent]
 def filter_by_index(df: pd.DataFrame, offset: int | None = None, limit: int | None = None) -> pd.DataFrame:
     """select range"""
     if offset and limit:
@@ -300,7 +297,6 @@ def filter_by_index(df: pd.DataFrame, offset: int | None = None, limit: int | No
     return df
 
 
-# TODO [TAG pandas dependent]
 def get_row_count_and_columns(df: pd.DataFrame) -> Tuple[int, List[str]]:
     """
     Extract from the data frame the number of rows and list of columns of the bulk data
@@ -310,3 +306,38 @@ def get_row_count_and_columns(df: pd.DataFrame) -> Tuple[int, List[str]]:
     nb_row = len(df.index)
     columns = df.columns.tolist()
     return nb_row, columns
+
+
+def split_into_chunks(
+    df: pd.DataFrame,
+    *,
+    max_values_per_chunk: int,
+    max_columns_per_chunk: int,
+) -> List[pd.DataFrame]:
+    """
+    breakdown a dataframe into several chunks given the limits of total number of values and columns provided. Split is
+    down column first. It applies horizontal slicing (by row) only if single column contains more values then the limit
+    requested.
+    :param df: dataframe to chunk
+    :param max_values_per_chunk: maximum number of values in each chunk
+    :param max_columns_per_chunk: maximum number of column in each chunk
+    :return: list of dataframe/chunk
+    """
+    if df.empty:
+        return [df]
+
+    nb_rows = len(df)
+    columns = natsorted(df.columns.tolist())
+
+    chunks: List[pd.DataFrame] = []
+    # split column first
+    if nb_rows > max_values_per_chunk:
+        for c in columns:
+            single_column_df = df[[c]]
+            for i in range(0, nb_rows, max_values_per_chunk):
+                chunks.append(single_column_df.iloc[i : i + max_values_per_chunk])
+    else:
+        column_per_chunk = min(max_columns_per_chunk, int(max_values_per_chunk / nb_rows))
+        for i in range(0, len(columns), column_per_chunk):
+            chunks.append(df[columns[i : i + column_per_chunk]])
+    return chunks

@@ -14,7 +14,7 @@
 
 import io
 from typing import Any, List
-from os.path import join, normpath
+from os.path import join, normpath, relpath
 
 try:
     import fsspec
@@ -47,12 +47,10 @@ class BlobStorageFsspec(BlobStorageBase):
         self._fs: fsspec.AbstractFileSystem = fsspec.filesystem(protocol or "file", **storage_options)
         self._protocol = protocol
 
-    def _build_path(self, tenant, object_name: str):
-        base_path = (
-            join(self._base_directory, tenant.data_partition_id) if self._base_directory else tenant.data_partition_id
-        )
+    def _build_path(self, _tenant, object_name: str):
         base_path = self._base_directory
-        object_name = join(base_path, object_name)
+        if base_path:
+            object_name = join(base_path, object_name)
         if self._protocol == "file":
             object_name = normpath(object_name)
             # don't replace volume - there's might be smarter way to do it ...
@@ -98,8 +96,15 @@ class BlobStorageFsspec(BlobStorageBase):
         timeout: int = 10,
         **kwargs,
     ) -> List[str]:
-        full_path = self._build_path(tenant, prefix + "*")
-        glob_result = self._fs.glob(full_path)
+        full_path = self._build_path(tenant, prefix)
+        if full_path.endswith("/") or full_path.endswith("//") or self._fs.isdir(full_path):
+            paths = [relpath(p, self._base_directory) for p in self._fs.ls(full_path)]
+            return paths
+
+        if self._fs.isfile(full_path):
+            return [prefix]
+
+        glob_result = [relpath(p, self._base_directory) for p in self._fs.glob(full_path + "*")]
         return glob_result
 
     @staticmethod

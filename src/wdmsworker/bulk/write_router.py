@@ -15,11 +15,13 @@
 from fastapi import APIRouter, Depends, Request, HTTPException, status, Query
 from pydantic import BaseModel
 
+from ..capture_timings import capture_timings
 from ..dependencies import blob_storage_dependency, tenant_dependency, content_type_dependency
 from ..model.describe import DataframeBasicDescribe
+from ..model.error_model import ErrorWithTypeResponse, LimitExceededErrorResponse
 from ..model.mime_types import MimeType
 from . import writer
-from . import write_errors as exc
+from . import errors as exc
 from ..logger import get_logger
 
 
@@ -37,26 +39,50 @@ class WriteBulkResponse(BaseModel):
     describe: DataframeBasicDescribe
 
 
-@write_bulk_router.post("/data/{record_id}/session/{session_id}")
+@write_bulk_router.post(
+    "/data/{record_id}/session/{session_id}",
+    responses={
+        status.HTTP_422_UNPROCESSABLE_ENTITY: {"description": "invalid content"},
+        status.HTTP_413_REQUEST_ENTITY_TOO_LARGE: {
+            "description": "the content size exceeds the limit.",
+            "model": LimitExceededErrorResponse,
+        },
+    },
+)
 async def post_bulk_chunk_in_session_route(
     record_id: str,
     session_id: str,
     request: Request,
+    reference: str | None = Query(default=None, description="name of the reference curve if any"),
     content_type: MimeType = Depends(content_type_dependency),
     storage=Depends(blob_storage_dependency),
     tenant=Depends(tenant_dependency),
 ) -> WriteChunkResponse:
-    # TODO validation is incomplete
     try:
         return await writer.write_bulk_data_in_session(
-            storage, tenant, await request.body(), content_type, record_id, session_id
+            storage, tenant, await request.body(), content_type, record_id, session_id, reference_curve=reference
         )
     except exc.BulkValidationError as e:
         get_logger().exception(f"validation error on write bulk for record {record_id}: {e}")
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
+    except (exc.TooManyValuesError, exc.TooManyValuesError) as e:
+        get_logger().error(f"too bug dataframe posted: {e}")
+        # TODO this might actually be done/solved here, better be strict for now ...
+        return LimitExceededErrorResponse.from_exception(e).to_response(additional_description="Data chunk too large")
 
 
-@write_bulk_router.post("/data/{record_id}")
+@write_bulk_router.post(
+    "/data/{record_id}",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"description": "bad request"},
+        status.HTTP_404_NOT_FOUND: {"description": "resource not found"},
+        status.HTTP_422_UNPROCESSABLE_ENTITY: {"description": "invalid content"},
+        status.HTTP_413_REQUEST_ENTITY_TOO_LARGE: {
+            "description": "the content size exceeds the limit.",
+            "model": LimitExceededErrorResponse,
+        },
+    },
+)
 async def post_bulk_data_route(
     record_id: str,
     request: Request,
@@ -69,42 +95,49 @@ async def post_bulk_data_route(
         bulk_id, bulk_description = await writer.write_bulk(
             storage, tenant, await request.body(), content_type, record_id, reference
         )
-    except exc.BulkUnprocessable as e:
+    except exc.BulkUnprocessableError as e:
         get_logger().error(f"error in post_bulk_data_route: {e}")
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
     except exc.BulkValidationError as e:
         get_logger().error(f"Validation failure in post_bulk_data_route: {e}")
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
-    except exc.BulkUploadFailure as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
+    except (exc.TooManyValuesError, exc.TooManyValuesError) as e:
+        get_logger().error(f"too bug dataframe posted: {e}")
+        # TODO this might actually be done/solved here, better be strict for now ...
+        return LimitExceededErrorResponse.from_exception(e).to_response(
+            additional_description="Bulk data is too large and must be split into smaller chunks"
+        )
+    except exc.BulkUploadError as e:
         get_logger().exception(f"exception at upload data to blob storage {e}")
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     return WriteBulkResponse.construct(bulkid=bulk_id, describe=bulk_description)
 
 
-# TODO for now let consumer handle session part
-# TODO only supports overwrite mode for now
+# TODO only supports overwrite commit mode for now
 @write_bulk_router.patch("/data/{record_id}/session/{session_id}")
+@capture_timings("PATCH /data/{record_id}/session/{session_id}")
 async def session_complete_route(
     record_id: str,
     session_id: str,
+    completion: writer.SessionCompletionMode = Query(...),
+    reference: str | None = Query(default=None, description="name of the reference curve if any"),
+    from_bulk: str | None = Query(default=None, description="previous bulk id for commit update"),
     storage=Depends(blob_storage_dependency),
     tenant=Depends(tenant_dependency),
 ):
-    from wdmsworker.bulk.catalog import get_chunks_metadata
-    from wdmsworker.bulk.chunk_meta import find_conflicts
+    if completion == writer.SessionCompletionMode.Abandon:
+        # TODO delete chunks
+        raise HTTPException(status.HTTP_501_NOT_IMPLEMENTED)
 
-    # TODO check how it behaves with several thousands chunks
-    metas = await get_chunks_metadata(storage, tenant, record_id, session_id)
-
-    #
-    conflicts = find_conflicts(metas)
-    if conflicts:
-        # TODO add conflicts supports
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "conflict found, not supported yet")
-
-    # build index
-    # chunks_meta_with_different_indexes = {meta.index_hash: meta for meta in metas}.values()
-    # TODO limit gather
-
-    raise NotImplementedError("session_complete_route")
+    try:
+        bulk_id, bulk_description = await writer.complete_session(
+            storage, tenant, record_id, session_id, completion, from_bulk, reference
+        )
+        return WriteBulkResponse.construct(bulkid=bulk_id, describe=bulk_description)
+    except exc.BulkCommitNoDataError as e:
+        return ErrorWithTypeResponse(errorType=e.errorType, message=e.description).to_response(
+            status.HTTP_422_UNPROCESSABLE_ENTITY
+        )
+    except (exc.BulkCommitError, exc.BulkValidationError) as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))

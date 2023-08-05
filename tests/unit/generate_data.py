@@ -11,11 +11,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from io import BytesIO
 
 import numpy as np
 
-# TODO [TAG pandas dependent]
 import pandas as pd
+
+from wdmsworker.model.mime_types import MimeTypes
 
 
 def generate_df(columns, index):
@@ -58,8 +60,21 @@ def generate_date_range(size):
 
 
 def assert_frame_equal(right, left):
-    # TODO temporary, reset index name, for now potentially set to '_wdms_index_' for compatibility with Dask
+    # reset index name as simulating previous Dask storage may result with a difference index name
     right.index.name = None
     left.index.name = None
 
     pd.testing.assert_frame_equal(right, left)
+
+
+def assert_dataframe_from_content(expected_df, content, accept_type, orient="split"):
+    if accept_type == MimeTypes.PARQUET:
+        actual_df = pd.read_parquet(BytesIO(content))
+    else:
+        actual_df = pd.read_json(content, orient=orient if isinstance(orient, str) else orient.value)
+    if expected_df.empty and actual_df.empty:
+        # corner case, when there's no row, just checking columns
+        assert list(expected_df.columns) == list(actual_df.columns)
+    else:
+        pd.testing.assert_frame_equal(expected_df, actual_df, check_dtype=accept_type == MimeTypes.PARQUET)
+    # check_dtype to False as json may lose strict type

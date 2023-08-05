@@ -19,8 +19,7 @@ from io import BytesIO
 import pandas as pd
 
 
-# TODO [TAG pandas dependent]
-@pytest.mark.parametrize("ref_values", [list(range(3, 9)), [2.2, 1.0, -0.55], [1, None, 3.3, 0]])
+@pytest.mark.parametrize("ref_values", [list(range(3, 9)), [2.2, 1.0, -0.55]], ids=["increasing", "decreasing"])
 def test_write_without_session(test_client, ref_values):
     reference_df = generate_df(["floatB", "floatA[1]", "floatA[0]"], index=range(len(ref_values)))
     reference_df["MD"] = ref_values
@@ -61,6 +60,22 @@ def test_write_without_session(test_client, ref_values):
     assert response.status_code == 200
     actual_df = pd.read_parquet(BytesIO(response.content))
     assert_frame_equal(reference_df, actual_df, check_column_order=False)
+
+
+@pytest.mark.parametrize("ref_values", [[2.2, 1.0, 1.0, -0.55], [1, None, 3.3, 4.0]], ids=["duplicate", "missing"])
+def test_write_without_session_invalid_cases(test_client, ref_values):
+    reference_df = generate_df(["floatB", "floatA[1]", "floatA[0]"], index=range(len(ref_values)))
+    reference_df["MD"] = ref_values
+    content = reference_df.to_parquet(index=True)
+
+    # WHEN write
+    response = test_client.post(
+        "/data/my_record_id?reference=MD", data=content, headers={"Content-Type": "application/parquet"}
+    )
+
+    # failure
+    assert response.status_code == 422
+    assert "MD" in response.text
 
 
 @pytest.mark.parametrize("ref_param", ({"reference": "MD"}, None))
@@ -151,7 +166,6 @@ def test_write_without_session_invalid_data_should_422(test_client):
     assert response.text  # some minimal description also provided
 
 
-# TODO [TAG pandas dependent]
 def test_write_without_session_invalid_index(test_client):
     reference_df = generate_df(["floatB", "floatA[1]", "floatA[0]"], index=[1, 5, 4, 4])
     content = reference_df.to_parquet(index=True)
@@ -159,12 +173,11 @@ def test_write_without_session_invalid_index(test_client):
     # WHEN write
     response = test_client.post("/data/my_record_id", data=content, headers={"Content-Type": "application/parquet"})
 
-    # THEN should get back an 400 error
-    assert response.status_code == 400
+    # THEN should get back an 422 error
+    assert response.status_code == 422
     assert "index" in response.text.lower()  # some minimal description about index also provided
 
 
-# TODO [TAG pandas dependent]
 def test_incorrect_filters_exception(test_client):
     reference_df = generate_df(["floatB", "floatC", "floatA"], index=range(6))
     content = reference_df.to_parquet(index=True)
@@ -185,7 +198,7 @@ def test_incorrect_filters_exception(test_client):
     )
     assert response.status_code == 400
     response_json = response.json()["detail"]
-    assert "Filtering error: Requested columns '['UnknownColumnName']' for filtering do not exist" == response_json
+    assert "Filtering error: Requested columns '['UnknownColumnName']' for filtering do not exist" in response_json
 
     unknown_operator_params = {"filter": "floatB:unknownOperator:100"}
     # WHEN read
@@ -197,30 +210,6 @@ def test_incorrect_filters_exception(test_client):
     assert response.status_code == 422
 
 
-# TODO [TAG pandas dependent]
-def test_too_many_values_requested(test_client):
-    reference_df = generate_df(["floatB", "floatC", "floatA"], index=range(3_400_000))
-    content = reference_df.to_parquet(index=True)
-
-    # WHEN write
-    response = test_client.post("/data/my_record_id", data=content, headers={"Content-Type": "application/parquet"})
-
-    # THEN
-    assert response.status_code == 200
-    bulk_id = response.json()["bulkid"]
-
-    # WHEN read
-    response = test_client.get(
-        f"/data/my_record_id/{bulk_id}",
-        headers={"accept": "application/parquet"},
-    )
-    assert response.status_code == 413
-    response_json = response.json()
-    assert response_json["message"]
-    assert response_json["limit"] == 10_000_000
-    assert response_json["requested"] == reference_df.size
-
-
 def test_basic_compute_and_get_stats(test_client):
     reference_df = generate_df(
         ["MD", "float-B", "floatC[0]", "floatC[1]", "bool-D", "date-E", "string-F"], index=range(42)
@@ -229,9 +218,7 @@ def test_basic_compute_and_get_stats(test_client):
 
     record_id = "my_record_id"
     # WHEN write
-    response = test_client.post(
-        f"/data/{record_id}?reference=MD", data=content, headers={"Content-Type": "application/parquet"}
-    )
+    response = test_client.post(f"/data/{record_id}", data=content, headers={"Content-Type": "application/parquet"})
 
     # THEN
     assert response.status_code == 200

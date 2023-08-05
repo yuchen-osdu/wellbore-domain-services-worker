@@ -17,6 +17,7 @@ from typing import List
 from fastapi import APIRouter, Depends, Query, HTTPException, status, Response
 
 from .filtering import BulkValueFilterOperator, ValueFilters, extract_bulk_filters
+from ..capture_timings import capture_timings
 from ..dependencies import (
     accept_dependency,
     json_orient_dependency,
@@ -24,12 +25,12 @@ from ..dependencies import (
     tenant_dependency,
 )
 from ..model.json_orient import JSONOrient
-from ..model.error_model import TooManyResourcesRequestedResponse
+from ..model.error_model import LimitExceededErrorResponse
 from ..model.mime_types import MimeType, MimeTypes
 from .catalog import async_load_bulk_catalog_with_blob_storage
 from ..logger import get_logger
 from . import reader
-from . import read_errors
+from . import errors
 
 read_bulk_router = APIRouter()
 
@@ -42,10 +43,11 @@ read_bulk_router = APIRouter()
         status.HTTP_412_PRECONDITION_FAILED: {"description": "not supported data format"},
         status.HTTP_413_REQUEST_ENTITY_TOO_LARGE: {
             "description": "the resource requested exceeds the limit.",
-            "model": TooManyResourcesRequestedResponse,
+            "model": LimitExceededErrorResponse,
         },
     },
 )
+@capture_timings("GET /data/{record_id}/{bulk_id}")
 async def get_bulk_route(
     record_id: str,
     bulk_id: str,
@@ -103,19 +105,15 @@ async def get_bulk_route(
             )
         return Response(read_result.content, media_type=read_result.mime_type.type)
 
-    except read_errors.ReadBulkCaseNotSupportedException:
+    except errors.BulkCaseNotSupportedError:
         raise HTTPException(status.HTTP_412_PRECONDITION_FAILED)
-    except read_errors.BulkCurvesNotFound as e:
+    except errors.CurvesNotFoundError as e:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(e))
-    except read_errors.LimitExceededError as e:
-        return Response(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            media_type=MimeTypes.JSON.type,
-            content=TooManyResourcesRequestedResponse.from_exception(e).json(),
-        )
+    except errors.LimitExceededError as e:
+        return LimitExceededErrorResponse.from_exception(e).to_response()
     except (
-        read_errors.ReadBulkInvalidParameter,
-        read_errors.FilteringError,
+        errors.InvalidParameterError,
+        errors.FilteringError,
     ) as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
 

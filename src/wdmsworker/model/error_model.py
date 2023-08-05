@@ -14,14 +14,36 @@
 
 
 from pydantic import BaseModel
-from ..bulk.read_errors import LimitExceededError
+from fastapi.responses import JSONResponse, Response
+from fastapi import status
+from ..bulk.errors import LimitExceededError
 
 
-class TooManyResourcesRequestedResponse(BaseModel):
+class LimitExceededErrorResponse(BaseModel):
     message: str
-    requested: int
+    actual: int
     limit: int
 
     @classmethod
     def from_exception(cls, ex: LimitExceededError):
-        return cls.construct(message=str(ex), requested=ex.requested, limit=ex.limit)
+        return cls.construct(message=str(ex), actual=ex.actual, limit=ex.limit)
+
+    def to_response(
+        self, status_code: int = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, additional_description: str | None = None
+    ) -> Response:
+        """:return: build a response with a 413 status code by default"""
+        if additional_description:
+            m = LimitExceededErrorResponse.construct(
+                message=f"{additional_description}. {self.message}", actual=self.actual, limit=self.limit
+            )
+        else:
+            m = self
+        return JSONResponse(m.dict(), status_code)
+
+
+class ErrorWithTypeResponse(BaseModel):
+    errorType: str
+    message: str
+
+    def to_response(self, status_code: int) -> Response:
+        return JSONResponse(self.dict(), status_code)

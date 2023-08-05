@@ -1,4 +1,3 @@
-# TODO [TAG pandas dependent]
 import pandas as pd
 import pytest
 
@@ -27,6 +26,11 @@ def test_column_describe_empty_dataframe(column_label):
 def test_index_describe_empty_dataframe():
     desc = ColumnDescribe.from_index(pd.DataFrame())
     assert desc.start_end_df().empty
+
+
+def test_index_describe_index_only_dataframe():
+    desc = ColumnDescribe.from_index(pd.DataFrame(index=[0, 1, 2]))
+    assert desc.start_end_df().index.values.tolist() == [0, 2]
 
 
 def test_column_describe_unknown_column():

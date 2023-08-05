@@ -12,121 +12,38 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
 import uuid
 
 import pandas as pd
 import pytest
 from osdu.core.api.storage.blob_storage_base import BlobStorageBase
 
-from ..generate_data import generate_df
 from wdmsworker.bulk.catalog import (
     BulkCatalog,
     ChunkGroup,
-    build_chunk_metadata,
-    build_chunk_metadata_json,
     async_load_bulk_catalog_with_blob_storage,
     async_save_bulk_catalog_with_blob_storage,
 )
+from wdmsworker.bulk.chunk_meta import ChunkMeta
+from wdmsworker.bulk import storage_path_builder
 
-
-def test_build_chunk_metadata():
-    df = generate_df(["B", "C", "A"], index=range(6))
-    m = build_chunk_metadata(df)
-    assert m["columns"] == ["B", "C", "A"]
-    assert all("int" in d for d in m["dtypes"])
-    assert m["nb_rows"] == 6
-
-    m = json.loads(build_chunk_metadata_json(df))
-    assert m["columns"] == ["B", "C", "A"]
-    assert all("int" in d for d in m["dtypes"])
-    assert m["nb_rows"] == 6
+from ..generate_data import generate_df
 
 
 def test_empty_catalog():
     catalog = BulkCatalog("id")
     assert catalog.chunk_count == 0
-    assert len(catalog.all_columns_dtypes) == 0
     d = catalog.as_dict()
     assert d["recordId"] == "id"
     assert d["nbRows"] == 0
     assert d["indexPath"] is None
 
 
-def test_add_multiple_chunk_group_same_schemas():
-    catalog = BulkCatalog("id")
-    all_paths = [["path1"], ["path2"], ["path3", "path4"]]
-    for paths in all_paths:
-        chunk_group = ChunkGroup({"A", "B"}, paths, ["Int32", "Int64"])
-        catalog.add_chunk(chunk_group)
-
-    catalog.all_columns_dtypes["A"] = "Int32"
-    catalog.all_columns_dtypes["B"] = "Int64"
-
-    column_path = catalog.get_paths_for_columns(["A", "B"], "test/")
-    assert len(column_path) == 1
-    assert catalog.all_columns_count == 2
-    assert column_path[0].labels == {"A", "B"}
-    assert set(column_path[0].paths) == set([f"test/{p}" for paths in all_paths for p in paths])
-
-
-def test_change_chunk_info():
-    catalog = BulkCatalog("id")
-    chunk_group = ChunkGroup({"A", "B"}, ["path1", "paths2"], ["Int32", "Int64"])
-    catalog.add_chunk(chunk_group)
-    chunk_group = ChunkGroup({"A"}, ["path3"], ["Float32"])
-    catalog.change_columns_info(chunk_group)
-
-    column_path = catalog.get_paths_for_columns(["A", "B"], "")
-    assert len(column_path) == 2
-    assert column_path[0].labels == set("B")
-    assert column_path[1].labels == set("A")
-    assert column_path[1].paths == ["path3"]
-
-    assert catalog.all_columns_dtypes["A"] == "Float32"
-    assert catalog.all_columns == {"A", "B"}
-
-
-@pytest.mark.perf
-def test_get_paths_for_columns_perf():
-    catalog = BulkCatalog("id")
-    for i in range(1000):
-        chunk_group = ChunkGroup({f"A{i}", f"B{i}"}, [f"path{i}_{j}" for j in range(500)], ["Int32"] * 500)
-        catalog.add_chunk(chunk_group)
-    import datetime
-
-    ts = datetime.datetime.now()
-    all_path = catalog.get_paths_for_columns([f"B{i}" for i in range(1000)], "")
-    print("get_paths_for_columns took ", (datetime.datetime.now() - ts).total_seconds())
-    assert len(all_path) == 1000
-
-    ts = datetime.datetime.now()
-    labels = {f"B{i}" for i in range(1000)}
-    all_path = catalog.filter_group_for_columns(labels)
-    all_path = [p.labels.intersection(labels) for p in all_path]
-    print("filter_group_for_columns + intersection took", (datetime.datetime.now() - ts).total_seconds())
-    assert len(all_path) == 1000
-
-
-def test_get_paths_for_columns_all_columns():
-    catalog = BulkCatalog("id")
-    chunk_group = ChunkGroup({"A", "B"}, ["path1", "paths2"], ["Int32", "Int64"])
-    catalog.add_chunk(chunk_group)
-    chunk_group = ChunkGroup({"C", "D"}, ["path3", "paths4"], ["Int32", "Int64"])
-    catalog.add_chunk(chunk_group)
-
-    column_path = catalog.get_paths_for_columns(None, "")
-    all_columns = {col for col_paths in column_path for col in col_paths.labels}
-    excepted_columns = {"A", "B", "C", "D"}
-    assert all_columns == excepted_columns
-    assert catalog.all_columns == all_columns
-
-
 def test_filter_group_for_columns():
     catalog = BulkCatalog("id")
-    chunk_group1 = ChunkGroup({"A", "B"}, ["path1", "paths2"], ["Int32", "Int64"])
+    chunk_group1 = ChunkGroup({"A", "B"}, ["path1", "paths2"])
     catalog.add_chunk(chunk_group1)
-    chunk_group2 = ChunkGroup({"C", "D"}, ["path3"], ["Int32", "Int64"])
+    chunk_group2 = ChunkGroup({"C", "D"}, ["path3"])
     catalog.add_chunk(chunk_group2)
 
     assert catalog.filter_group_for_columns({"A"}) == [chunk_group1]
@@ -138,9 +55,9 @@ def test_filter_group_for_columns():
 
 def test_is_columns_slide_only():
     catalog = BulkCatalog("id")
-    chunk_group = ChunkGroup({"A", "B"}, ["path1", "paths2"], ["Int32", "Int64"])
+    chunk_group = ChunkGroup({"A", "B"}, ["path1", "paths2"])
     catalog.add_chunk(chunk_group)
-    chunk_group = ChunkGroup({"C", "D"}, ["path3"], ["Int32", "Int64"])
+    chunk_group = ChunkGroup({"C", "D"}, ["path3"])
     catalog.add_chunk(chunk_group)
 
     assert not catalog.is_columns_slide_only()
@@ -155,17 +72,16 @@ def test_is_columns_slide_only():
     assert catalog.is_columns_slide_only({"C", "D", "A", "B"})
 
 
-@pytest.mark.skip
 def test_is_columns_slide_only_handle_many_columns():
     # 400 chunks with 500 columns each
     catalog = BulkCatalog("id")
     for i in range(400):
-        catalog.add_chunk(ChunkGroup({f"C{i}[{j}]" for j in range(500)}, [f"path{i}"], []))
+        catalog.add_chunk(ChunkGroup({f"C{i}[{j}]" for j in range(500)}, [f"path{i}"]))
 
     assert catalog.is_columns_slide_only()
     assert catalog.is_columns_slide_only({f"C{i}[{j}]" for j in range(10, 70) for i in (3, 5, 100, 244)})
 
-    catalog.add_chunk(ChunkGroup({"C2[50]"}, [f"pathX"], []))
+    catalog.add_chunk(ChunkGroup({"C2[50]"}, [f"pathX"]))
     assert not catalog.is_columns_slide_only()
     assert catalog.is_columns_slide_only({f"C{i}[{j}]" for j in range(10, 70) for i in (3, 5, 100, 244)})
     assert not catalog.is_columns_slide_only({"C2[50]"})
@@ -201,12 +117,11 @@ async def test_save_load_catalog(bulk_storage_mock: BlobStorageBase, test_tenant
     assert catalog.nb_rows == reloaded_catalog.nb_rows
     assert catalog.index_path == reloaded_catalog.index_path
     assert catalog.all_columns == reloaded_catalog.all_columns
-    assert catalog.all_columns_dtypes == reloaded_catalog.all_columns_dtypes
 
 
 def test_describe_column_selection():
     catalog = BulkCatalog("id")
-    catalog.add_chunk(ChunkGroup({"A", "B", "C"}, [f"pathA", f"pathB", f"pathC"], []))
+    catalog.add_chunk(ChunkGroup({"A", "B", "C"}, [f"pathA", f"pathB", f"pathC"]))
 
     nb_r, cols = catalog.describe(column_selection=["B", "A"])
     assert nb_r == 0
@@ -221,8 +136,46 @@ def test_describe_many_columns():
     catalog = BulkCatalog("id")
     # generate 200 000 columns
     for i in range(25):
-        catalog.add_chunk(ChunkGroup({f"C{i}[{j}]" for j in range(8000)}, [f"path{i}"], []))
+        catalog.add_chunk(ChunkGroup({f"C{i}[{j}]" for j in range(8000)}, [f"path{i}"]))
 
     nb_r, cols = catalog.describe()
     assert nb_r == 0
     assert len(cols) == 200_000
+
+
+def test_catalog_from_chunk_meta():
+    record_root = storage_path_builder.record_path_level_0("r_id")
+    base_path = storage_path_builder.session_path_level_1("r_id", "s_id")
+    ch1 = generate_df(["A", "B"], [0, 1])
+    ch2 = generate_df(["A", "B"], [2, 3, 4])
+    ch3 = generate_df(["C"], [2, 3, 4])
+    global_index = ch1.index.union(ch2.index).union(ch3.index)
+
+    metas = [ChunkMeta.from_dataframe(df, base_path) for df in [ch1, ch2, ch3]]
+    catalog = BulkCatalog.from_metas("r_id", metas, global_index=global_index)
+    assert catalog.nb_rows == 5
+    assert catalog.record_id == "r_id"
+    assert catalog.all_columns == {"A", "B", "C"}
+    assert catalog.chunk_count == 3
+    assert catalog.all_columns_count == 3
+    assert not catalog.is_columns_slide_only({"A"})
+    assert not catalog.is_columns_slide_only({"B"})
+    assert catalog.is_columns_slide_only({"C"})
+    paths = set(catalog.get_chunk_paths())
+    for m in metas:
+        assert m.get_filepath(ChunkMeta.FileType.CHUNK, relative_to=record_root) in paths
+    for p in paths:
+        assert p.endswith("parquet")
+    chunk_groups = catalog.filter_group_for_columns("B")
+    assert len(chunk_groups) == 1
+    assert chunk_groups[0].labels == {"A", "B"}
+    assert len(set(chunk_groups[0].paths)) == 2
+
+    chunk_groups = catalog.filter_group_for_columns("C")
+    assert len(chunk_groups) == 1
+    assert chunk_groups[0].labels == {"C"}
+    assert len(set(chunk_groups[0].paths)) == 1
+
+    chunk_groups = catalog.filter_group_for_columns(["C", "B"])
+    assert len(chunk_groups) == 2
+    assert {frozenset(c.labels) for c in chunk_groups} == {frozenset("AB"), frozenset("C")}

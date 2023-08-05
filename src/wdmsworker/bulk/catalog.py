@@ -17,90 +17,42 @@ This module groups function related to bulk catalog.
 A catalog contains metadata of the chunks
 """
 import json
-import asyncio
-import hashlib
 from contextlib import suppress
 from dataclasses import dataclass
-from .dataframe import ColumnSelection, get_requested_columns, sort_column_labels
-from typing import Dict, Iterable, Iterator, List, NamedTuple, Optional, Set, Tuple
+from typing import Iterable, Iterator, List, Set, Tuple, Dict
 from itertools import chain
 from io import BytesIO
+from asyncio import create_task
 
-# TODO [TAG pandas dependent]
 import pandas as pd
 
 from osdu.core.api.storage.blob_storage_base import BlobStorageBase
 from osdu.core.api.storage.exceptions import ResourceNotFoundException
 
+from . import storage_path_builder
+from .dataframe import ColumnSelection, get_requested_columns, sort_column_labels, group_curve_columns, dump_to_parquet
 from .chunk_meta import ChunkMeta
 from ..capture_timings import timeit, capture_timings
-from .storage_path_builder import (
-    join,
-    catalog_file_path,
-    is_a_chunk_file,
-    record_relative_path_TO_DELETE,
-    session_path_level_1,
-)
-
-
-# TODO [TAG pandas dependent]
-def build_chunk_metadata(dataframe: pd.DataFrame) -> dict:
-    """Returns dataframe metadata
-    Other metadata such as start_index or stop_index are saved into the chunk filename
-
-    >>> build_chunk_metadata(pd.DataFrame({'A': [1,2,3], 'B': [4,5,6]}, index=[0,1,2]))
-    {
-        'columns': ['A', 'B'],
-        'dtypes': ['int64', 'int64'],
-        'nb_rows': 3,
-        'index_hash': 'ab2fa50ae23ce035bad2e77ec5e0be05c2f4b816'
-    }
-    """
-    return {
-        "columns": list(dataframe.columns),
-        "dtypes": [str(dt) for dt in dataframe.dtypes],
-        "nb_rows": len(dataframe.index),
-        "index_hash": hashlib.sha1(dataframe.index.values).hexdigest(),
-    }
-
-
-# TODO [TAG pandas dependent]
-def build_chunk_metadata_json(dataframe: pd.DataFrame) -> str:
-    """Returns dataframe metadata
-    Other metadata such as start_index or stop_index are saved into the chunk filename
-
-    >>> build_chunk_metadata(pd.DataFrame({'A': [1,2,3], 'B': [4,5,6]}, index=[0,1,2]))
-    {
-        'columns': ['A', 'B'],
-        'dtypes': ['int64', 'int64'],
-        'nb_rows': 3,
-        'index_hash': 'ab2fa50ae23ce035bad2e77ec5e0be05c2f4b816'
-    }
-    """
-    columns_values = '["' + '", "'.join(list(dataframe.columns)) + '"]'
-    dtypes_values = '["' + '", "'.join(str(dt) for dt in dataframe.dtypes) + '"]'
-    index_hash = f'"{hashlib.sha1(dataframe.index.values).hexdigest()}"'
-
-    return (
-        "{"
-        f'"columns": {columns_values}, "dtypes": {dtypes_values}, "nb_rows": {len(dataframe.index)}, "index_hash":'
-        f" {index_hash}"
-        "}"
-    )
+from .storage_path_builder import catalog_file_path, record_relative_path, join
 
 
 @dataclass
 class ChunkGroup:
-    """A chunk group represent a chunk list having exactly the same schemas
-    (columns labels and dtypes)"""
+    """
+    A chunk group represent a chunk list having exactly the same schemas
+    (columns labels and dtypes).
+    Attributes:
+        - labels: Set[str]: set of columns labels
+        - paths: List[str]: list of path of the chunks, path is relative to record root path, therefore relative to path
+                            built using `storage_path_builder.record_path_level_0` since chunks may comes from various
+                            sessions
+    """
 
     labels: Set[str]
     paths: List[str]
-    dtypes: List[str]
 
 
 ColumnLabel = str
-ColumnDType = str
 
 
 class BulkCatalogOrigin:
@@ -125,9 +77,11 @@ class BulkCatalogOrigin:
 
 
 class BulkCatalog:
-    """Represent a bulk catalog
+    """
+    Represent a bulk catalog. Note: all path are expected to be relative to the record root folder
     Example:
         {
+            "fileVersion": "2",
             "recordId": "7507fb30-9cfa-4506-9cd8-6cbacbcda740",
             "nbRows": 1000,
             "indexPath": "folder/wdms_index/index.parquet,
@@ -135,27 +89,81 @@ class BulkCatalog:
                 {
                     "labels": ["A", "B"],
                     "paths": ["folder/file1.parquet", "folder/file2.parquet"],
-                    "dtypes": ["Int64, "Float32"]
                 },
                 {
                     "labels": ["C"],
                     "paths": ["folder/file3.parquet"],
-                    "dtypes": ["Float32"]
                 }
             ],
         }
     """
 
-    def __init__(self, record_id: str, origin: Optional[BulkCatalogOrigin] = None) -> None:
-        self._record_id: str = record_id
-        self.nb_rows: int = 0
-        self.index_path: Optional[str] = None
-        self._columns: List[ChunkGroup] = []
-        self.origin = origin or BulkCatalogOrigin()  # not persisted
+    file_version = "2"
 
-        # cached attributes, to be cleaned as soon as _columns change
-        self._columns_labels: Optional[Set[str]] = None
-        self._columns_dtypes: Dict[ColumnLabel, ColumnDType] | None = None
+    def __init__(
+        self,
+        record_id: str,
+        nb_rows: int = 0,
+        index_path: str | None = None,
+        chunk_groups: List[ChunkGroup] | None = None,
+        origin: BulkCatalogOrigin | None = None,
+    ) -> None:
+        self._record_id: str = record_id
+        self.nb_rows: int = nb_rows
+        self.index_path: str | None = index_path
+        self._columns: List[ChunkGroup] = chunk_groups or []
+        self.origin = origin or BulkCatalogOrigin()  # not persisted
+        self.reference: str | None = None
+
+        self._curves: Dict[str, int] | None = None
+
+        # cached attributes, cleaned as soon as _columns change
+        self._columns_labels: Set[str] | None = None
+
+    @property
+    def curves(self) -> Dict[str, int]:
+        if self._curves is None:
+            grouped_curves = group_curve_columns(self.all_columns, include_non_array=True)
+            self._curves = {label: len(columns) for label, columns in grouped_curves.items()}
+        return self._curves
+
+    @classmethod
+    def from_metas(
+        cls,
+        record_id: str,
+        chunk_metas: List[ChunkMeta],
+        *,
+        nb_rows: int = 0,
+        global_index: pd.Index | pd.Series | pd.DataFrame | None = None,
+    ) -> "BulkCatalog":
+        """
+        build a catalog from chunk meta. Chunks are expected to be provided without any conflicts/overlaps.
+        all path put inside the catalog are related to the record root path aka `record_path_level_0`.
+        :param record_id:
+        :param chunk_metas: file base path must be set inside chunk meta
+        :param nb_rows:
+        :param global_index: if provided, nb_row is extracted from it
+        :return:
+        """
+
+        # group chunk metas by columns shape
+        metas_by_columns: Dict[str, List[ChunkMeta]] = {}
+        for m in chunk_metas:
+            metas_by_columns.setdefault(m.column_hash, []).append(m)
+
+        record_root_path = storage_path_builder.record_path_level_0(record_id)
+        chunk_groups: List[ChunkGroup] = []
+        for chunks in metas_by_columns.values():
+            if chunks:
+                chunk_groups.append(
+                    ChunkGroup(
+                        labels=set(chunks[0].columns_set),
+                        paths=[c.get_filepath(ChunkMeta.FileType.CHUNK, relative_to=record_root_path) for c in chunks],
+                    )
+                )
+        if global_index is not None:
+            nb_rows = len(global_index)
+        return cls(record_id, nb_rows, None, chunk_groups)
 
     @property
     def record_id(self) -> str:
@@ -168,7 +176,7 @@ class BulkCatalog:
         """
         return len(self.all_columns)
 
-    def is_columns_slide_only(self, columns_to_check: Optional[Set[str]] = None) -> bool:
+    def is_columns_slide_only(self, columns_to_check: Set[str] | None = None) -> bool:
         """
         return True if the bulk is only cut by columns, i.e. there's one and only one chunk to read to get full column
         """
@@ -200,23 +208,15 @@ class BulkCatalog:
 
         return True
 
-    @property
-    def all_columns_dtypes(self) -> Dict[ColumnLabel, ColumnDType]:
-        """Returns all columns with their dtype
-        Returns:
-            Dict[str, str]:  a dict { column label : column dtype }
-        """
-        if self._columns_dtypes is not None:
-            return self._columns_dtypes
-        res = {}
-        for col_group in self._columns:
-            res.update({cn: dt for cn, dt in zip(col_group.labels, col_group.dtypes)})
-        self._columns_dtypes = res
-        return res
-
     def _clean_column_cache(self):
         self._columns_labels = None
-        self._columns_dtypes = None
+
+    def add_index_path(self, bulk_id: str):
+        """
+        fill up index path given the bulk_id, index is unique per bulk_id
+        :param bulk_id:
+        """
+        self.index_path = join(storage_path_builder.bulk_path_level_1(None, bulk_id), "_wdms_index_", "index.parquet")
 
     @property
     def all_columns(self) -> Set[str]:
@@ -231,8 +231,14 @@ class BulkCatalog:
         return len(set(self.get_chunk_paths()))
 
     def get_chunk_paths(self) -> Iterator[str]:
-        """iterator over all paths"""
+        """iterator over all paths, not path are provided relative to the record root dir"""
         return chain.from_iterable((col_group.paths for col_group in self._columns))
+
+    def get_absolut_chunk_paths(self) -> Iterator[str]:
+        """same as `get_chunk_path but with absolut path"""
+        record_root_dir = storage_path_builder.record_path_level_0(self.record_id)
+        for p in self.get_chunk_paths():
+            yield storage_path_builder.join(record_root_dir, p)
 
     @staticmethod
     def is_single_file_chunk(chunk_path) -> bool:
@@ -242,9 +248,9 @@ class BulkCatalog:
         # from session_file_meta. Luckily the only way chunk is generated using Dask is when conflict resolution
         # happen and the name format is different (just a uuid)
         # Another way would be to check is the path point to a file (raw chunk) or a folder (Dask multi partition)
-        return is_a_chunk_file(chunk_path)
+        return ChunkMeta.is_a_chunk_file(chunk_path)
 
-    # TODO performance bottleneck detected
+    # TODO to move in unit test: performance bottleneck detected
     def add_chunk(self, chunk_group: ChunkGroup) -> None:
         """Add ChunkGroup to the catalog."""
         if len(chunk_group.labels) == 0:
@@ -260,58 +266,6 @@ class BulkCatalog:
         else:
             self._columns.append(chunk_group)
 
-    def remove_columns_info(self, labels: Iterable[str]) -> None:
-        """Removes columns information
-        Args:
-            labels (Iterable[str]): columns labels to remove
-        """
-
-        self._clean_column_cache()
-        clean_needed = False
-        labels_set = frozenset(labels)
-
-        for col_group in self._columns:
-            remaining_columns = {
-                col: dt for col, dt in zip(col_group.labels, col_group.dtypes) if col not in labels_set
-            }
-            if len(remaining_columns) != len(col_group.labels):
-                col_group.labels = set(remaining_columns.keys())
-                col_group.dtypes = list(remaining_columns.values())
-                clean_needed = clean_needed or len(col_group.labels) == 0
-        if clean_needed:
-            self._columns = [c for c in self._columns if c.labels]
-
-    def change_columns_info(self, chunk_group: ChunkGroup) -> None:
-        """Replace column information with the given one
-        Args:
-            chunk_group (ChunkGroup): new column information
-        """
-        self.remove_columns_info(chunk_group.labels)
-        self.add_chunk(chunk_group)
-
-    class ColumnsPaths(NamedTuple):
-        labels: Set[str]
-        paths: List[str]
-
-    # TODO performance bottleneck detected
-    def get_paths_for_columns(self, labels: Iterable[str], base_path: str) -> List[ColumnsPaths]:
-        """Returns the paths to load data of the requested columns grouped by paths
-        Args:
-            labels (Iterable[str]): List of desired columns. If None or empty select all columns.
-            base_path (str): Base path as prefix to chunks path
-        Returns:
-            List[ColumnsPaths]: The requested columns grouped by paths
-        """
-        grouped_files = []
-
-        for col_group in self._columns:
-            matching_columns = col_group.labels.intersection(labels) if labels else col_group.labels
-            if matching_columns:
-                grouped_files.append(
-                    self.ColumnsPaths(labels=matching_columns, paths=[join(base_path, f) for f in col_group.paths])
-                )
-        return grouped_files
-
     def filter_group_for_columns(self, labels: Iterable[str] | None) -> List[ChunkGroup]:
         if labels:
             return [col_group for col_group in self._columns if not col_group.labels.isdisjoint(labels)]
@@ -323,15 +277,18 @@ class BulkCatalog:
             "recordId": self.record_id,
             "nbRows": self.nb_rows,
             "indexPath": self.index_path,
-            "columns": [{"labels": list(c.labels), "paths": c.paths, "dtypes": c.dtypes} for c in self._columns],
+            "columns": [{"labels": list(c.labels), "paths": c.paths} for c in self._columns],
+            "curves": self.curves,
+            "reference": self.reference,
+            "version": self.file_version,
         }
 
     def describe(
         self,
         *,
-        offset: Optional[int] = None,
-        limit: Optional[int] = None,
-        column_selection: Optional[ColumnSelection] = None,
+        offset: int | None = None,
+        limit: int | None = None,
+        column_selection: ColumnSelection | None = None,
     ) -> Tuple[int, List[str]]:
         """
         Retrieve from the catalog the number of rows and list of columns of the bulk data
@@ -360,14 +317,15 @@ class BulkCatalog:
         catalog = cls(record_id=catalog_as_dict["recordId"])
         catalog.nb_rows = catalog_as_dict["nbRows"]
         catalog.index_path = catalog_as_dict["indexPath"]
-        catalog._columns = [ChunkGroup(set(c["labels"]), c["paths"], c["dtypes"]) for c in catalog_as_dict["columns"]]
+        catalog._columns = [ChunkGroup(set(c["labels"]), c["paths"]) for c in catalog_as_dict["columns"]]
+        catalog._curves = catalog_as_dict.get("curves")
+        catalog.reference = catalog_as_dict.get("reference")
+        catalog.file_version = catalog_as_dict.get("version", "1")  # if version not there, assume previous version
         return catalog
 
-    # TODO [TAG pandas dependent]
     @classmethod
     def from_single_dataframe(cls, record_id: str, path: str, dataframe: pd.DataFrame) -> "BulkCatalog":
-        # TODO double check that, current understanding from DaskStorage._build_catalog_from_path
-        rel_path = record_relative_path_TO_DELETE(record_id, path, base_directory=None)
+        rel_path = record_relative_path(record_id, path, base_directory=None)
 
         catalog = cls(record_id)
         catalog.nb_rows = dataframe.shape[0]
@@ -375,7 +333,6 @@ class BulkCatalog:
             ChunkGroup(
                 labels=set(dataframe.columns),  # TODO review as it lost order + relation to dtypes
                 paths=[rel_path],
-                dtypes=[str(d) for d in dataframe.dtypes.values],
             )
         )
         return catalog
@@ -384,7 +341,7 @@ class BulkCatalog:
 @capture_timings("async_load_bulk_catalog_with_blob_storage")
 async def async_load_bulk_catalog_with_blob_storage(
     storage: BlobStorageBase, tenant, record_id: str, bulk_id: str
-) -> Optional[BulkCatalog]:
+) -> BulkCatalog | None:
     storage_full_name = catalog_file_path(record_id, bulk_id, base_directory=None)
     with suppress(ResourceNotFoundException):
         with timeit("async download bulk_catalog"):
@@ -398,27 +355,38 @@ async def async_load_bulk_catalog_with_blob_storage(
 
 @capture_timings("async_save_bulk_catalog_with_blob_storage")
 async def async_save_bulk_catalog_with_blob_storage(
-    storage: BlobStorageBase, tenant, bulk_id: str, catalog: BulkCatalog
+    storage: BlobStorageBase,
+    tenant,
+    bulk_id: str,
+    catalog: BulkCatalog,
+    index_df: pd.Index | pd.DataFrame | None = None,
+    reference: str | None = None,
 ) -> None:
+    catalog.reference = reference
     storage_full_name = catalog_file_path(catalog.record_id, bulk_id, base_directory=None)
+    upload_index_task = None
+    if index_df is not None:
+        if isinstance(index_df, pd.Index):
+            index_df = pd.DataFrame(index=index_df)
+        else:
+            # TODO input dataframe may contains reference values also, not sure if it worth keeping these values
+            #  separated to speed up some workflow read .
+            index_df = pd.DataFrame(index=index_df.index)
 
-    # TODO it might be possible to directly dump as bytes by passing the encoding
+        catalog.add_index_path(bulk_id)
+        upload_index_task = create_task(
+            storage.upload(
+                tenant,
+                join(storage_path_builder.record_path_level_0(catalog.record_id), catalog.index_path),
+                dump_to_parquet(index_df),
+            )
+        )
+
     with timeit("json dumps bulk_catalog"):
         json_bytes = json.dumps(catalog.as_dict(), indent=0).encode()
 
     with timeit(f"upload bulk_catalog of size {len(json_bytes)}"):
         await storage.upload(tenant, storage_full_name, BytesIO(json_bytes))
 
-
-@capture_timings("get_chunks_metadata")
-async def get_chunks_metadata(storage: BlobStorageBase, tenant, record_id: str, session_id: str) -> List[ChunkMeta]:
-    """Return metadata objects for a given session"""
-    session_path = session_path_level_1(record_id, session_id, base_directory=None)
-    all_objs = await storage.list_objects(tenant, prefix=session_path)
-
-    async def _load_single_meta(s, t, f) -> ChunkMeta:
-        content = await s.download(t, f)
-        return ChunkMeta.load(f, content)
-
-    with timeit(f"loading {len(all_objs)} chunk meta files"):
-        return await asyncio.gather(*[_load_single_meta(storage, tenant, o) for o in all_objs if o.endswith(".meta")])
+    if upload_index_task is not None:
+        await upload_index_task
