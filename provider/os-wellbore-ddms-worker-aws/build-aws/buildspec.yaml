@@ -49,7 +49,7 @@ phases:
   pre_build:
     commands:
       - echo "Logging in to Amazon ECR..."
-      - $(aws ecr get-login --no-include-email --region $AWS_REGION) # authenticate with ECR via the AWS CLI
+      - aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${ECR_REGISTRY} # authenticate with ECR via the AWS CLI
 
   build:
     commands:
@@ -75,11 +75,16 @@ phases:
       - GIT_SECRETS_SCAN_RESULT=$(git secrets --scan 2> ${OUTPUT_DIR}/git_secrets.out.txt && echo OK || echo FAILED)
       - if [ "$GIT_SECRETS_SCAN_RESULT" = "FAILED" ]; then echo "Secrets detected!" && exit 1; fi
 
+      - export PIP_EXTRA_INDEX_URL="https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple https://community.opengroup.org/api/v4/projects/148/packages/pypi/simple"
+      - pip3 install -e ".[dev]"
+      - pip3 install -e ".[aws]"
+      # - coverage run -m pytest ./tests/unit/provider/aws --junitxml=report.xml
+      # - coverage report
+      - pytest --junit-xml=unit_tests_report.xml --cov=src/wdmsworker --cov-report=html --cov-report=xml ./tests/unit/provider/aws/aws_test.py
       # using jar instead of executable since exe requires 32 bit image and doesn't work on codebuild 4.0
       - |
         java -jar sonar-scanner-4.6.2.2472/lib/sonar-scanner-cli-4.6.2.2472.jar -Dsonar.projectKey=wellbore-ddms-worker -Dsonar.host.url=${SONAR_URL} \
-          -Dsonar.login=${SONAR_USERNAME} -Dsonar.password=${SONAR_PASSWORD} -Dsonar.branch.name=${BRANCH_NAME}
-      
+          -Dsonar.login=${SONAR_USERNAME} -Dsonar.password=${SONAR_PASSWORD} -Dsonar.branch.name=${BRANCH_NAME} -Dsonar.python.coverage.reportPaths=coverage.xml
 
       - sed -i "s|__CONTAINER__|$ECR_IMAGE|"  devops/aws/chart/values.yaml
       - echo "--Copying Helm Charts to ${OUTPUT_DIR:-dist}--"
