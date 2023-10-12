@@ -33,6 +33,7 @@ from ..model.describe import DataframeBasicDescribe, ColumnDescribe
 from ..logger import get_logger
 
 re_column_array = re.compile(r"^(?P<name>.+)\[(?P<start>[^:]+):?(?P<stop>.*)\]$")
+re_column_array_int = re.compile(r"^(?P<name>.+)\[(?P<idx>[0-9]+)\]$")
 
 
 def group_curve_columns(all_columns: Iterable[str], include_non_array=True) -> Dict[str, List[str]]:
@@ -59,6 +60,35 @@ def group_curve_columns(all_columns: Iterable[str], include_non_array=True) -> D
         elif include_non_array:
             array_col[c] = [c]
     return array_col
+
+
+def columns_to_slices(columns: Iterable[str]) -> List[str]:
+    """
+    try to group columns of an array as slice notation
+    `["A", "C[1]", "C[4]", "C[3]", "C[2]", "C[2]", "C[6]"]` become `["A", "C[1:6]"]`
+    :param columns:
+    :return: list of columns or slices when possible
+    """
+    array_col: Dict[str, List[str]] = {}
+    result = []
+    for c in columns:
+        match_result = re_column_array_int.match(c)
+        if match_result:
+            array_col.setdefault(match_result["name"], []).append(match_result["idx"])
+        else:
+            result.append(c)
+    for c, indexes in array_col.items():
+        if len(indexes) == 1:
+            result.append(f"{c}[{indexes[0]}]")
+            continue
+
+        np_arr = np.array(indexes, int)
+        amin, amax = np_arr.min(), np_arr.max()
+        if len(indexes) == amax + 1 - amin:
+            result.append(f"{c}[{amin}:{amax}]")
+        else:
+            result.extend(f"{c}[{idx}]" for idx in indexes)
+    return result
 
 
 def get_array_columns(all_columns: Iterable[str]) -> Dict[str, List[str]]:
@@ -295,17 +325,6 @@ def filter_by_index(df: pd.DataFrame, offset: int | None = None, limit: int | No
     if limit:
         return df.iloc[:limit]
     return df
-
-
-def get_row_count_and_columns(df: pd.DataFrame) -> Tuple[int, List[str]]:
-    """
-    Extract from the data frame the number of rows and list of columns of the bulk data
-    :param df: The input DataFrame
-    :return: The number of rows and the list of columns
-    """
-    nb_row = len(df.index)
-    columns = df.columns.tolist()
-    return nb_row, columns
 
 
 def split_into_chunks(

@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import asyncio
 from io import BytesIO
 import uuid
 
@@ -51,6 +50,7 @@ from wdmsworker.bulk.reader import (
     _build_response_from_df,
     load_same_shape_dataframes_from_storage,
     _build_response_from_describe,
+    _validate_parameters,
 )
 from wdmsworker.model.json_orient import JSONOrient
 from wdmsworker.model.mime_types import MimeTypes, MimeType
@@ -60,7 +60,10 @@ format_params = [
     pytest.param(MimeTypes.JSON, JSONOrient.Split, id="json"),
 ]
 
-describe_params = [False, True]
+describe_params = [
+    pytest.param(False, id="read_data"),
+    pytest.param(True, id="describe"),
+]
 
 
 def assert_describe_from_content(expected_df, response):
@@ -275,13 +278,42 @@ async def test_request_too_many_values_raise():
     catalog.nb_rows = 100_000_000
     args = [AsyncMock(), Mock(), catalog, MimeTypes.PARQUET, None]
 
-    # request 6M
+    # request 600M
     with pytest.raises(TooManyValuesError):
         await read_bulk(*args, curves_selection=[f"C[{i}]" for i in range(6)])
 
     # request 4M but need to work on a 100M dataframe
     with pytest.raises(TooManyValuesError):
         await read_bulk(*args, limit=40_000)
+
+
+@pytest.mark.anyio
+async def test_validate_for_describe_many_values():
+    catalog = BulkCatalog("", origin=BulkCatalogOrigin.generated_from_bulk())
+    catalog.add_chunk(ChunkGroup({f"C[{i}]" for i in range(100)}, ["path1"]))
+    catalog.nb_rows = 100_000_000
+    args = [AsyncMock(), Mock(), catalog, MimeTypes.PARQUET, None]
+
+    # validate for describe on 1B without value filtering is valid
+    _validate_parameters(catalog, None, None, describe=True, curves_selection=[f"C[{i}]" for i in range(10)])
+
+    # request describe with value filter but involves just 100M values is still valid
+    values_filters = [
+        BulkValueFilter(column="C[0]", operator=BulkValueFilterOperator.Greater, value="1"),
+    ]
+    _validate_parameters(catalog, None, None, None, describe=True, value_filters=ValueFilters(values_filters))
+
+    # adding a second column to filter one will involve too many values (200M) this time
+    values_filters.append(BulkValueFilter(column="C[1]", operator=BulkValueFilterOperator.Greater, value="1"))
+    with pytest.raises(TooManyValuesError):
+        _validate_parameters(catalog, None, None, None, describe=True, value_filters=ValueFilters(values_filters))
+
+    # even with index filtering and curve selection
+    with pytest.raises(TooManyValuesError):
+        _validate_parameters(catalog, None, 100, ["C[2]"], describe=True, value_filters=ValueFilters(values_filters))
+
+    with pytest.raises(TooManyValuesError):
+        await read_bulk(*args, describe=True, filters_params=ValueFilters(values_filters))
 
 
 @pytest.mark.anyio
@@ -525,9 +557,10 @@ async def test_read_bulk_old_dask_storage_unsupported_case(bulk_storage_mock: Bl
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("describe", describe_params)
 @pytest.mark.parametrize(["accept_type", "orient"], format_params)
 async def test_single_chunk_case_array(
-    bulk_storage_mock: BlobStorageBase, test_tenant, accept_type, orient: JSONOrient
+    bulk_storage_mock: BlobStorageBase, test_tenant, accept_type, orient: JSONOrient, describe: bool
 ):
     # GIVEN df split into 4 chunks
     basic_cols = ["MD", "GR"]
@@ -550,7 +583,11 @@ async def test_single_chunk_case_array(
 
     expected_df = reference_df[arrays_cols].loc[(reference_df["MD"] > 500)]
     await assert_read_bulk(
-        **common_kwargs, columns=["ARR"], expected_df=expected_df, filters_params=ValueFilters(bulk_filters)
+        **common_kwargs,
+        columns=["ARR"],
+        expected_df=expected_df,
+        filters_params=ValueFilters(bulk_filters),
+        describe=describe,
     )
 
     await assert_read_bulk(
@@ -558,12 +595,16 @@ async def test_single_chunk_case_array(
         columns=[],
         expected_df=reference_df[natsorted(cols)].loc[(reference_df["MD"] >= 500)],
         filters_params=ValueFilters(bulk_filters),
+        describe=describe,
     )
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("describe", describe_params)
 @pytest.mark.parametrize(["accept_type", "orient"], format_params)
-async def test_multi_chunk_case_array(bulk_storage_mock: BlobStorageBase, test_tenant, accept_type, orient: JSONOrient):
+async def test_multi_chunk_case_array(
+    bulk_storage_mock: BlobStorageBase, test_tenant, accept_type, orient: JSONOrient, describe: bool
+):
     # GIVEN df split into 4 chunks
     basic_cols = ["MD", "GR"]
     arrays_cols = [f"ARR[{i}]" for i in range(50)]
@@ -600,6 +641,7 @@ async def test_multi_chunk_case_array(bulk_storage_mock: BlobStorageBase, test_t
         columns=["ARR"],
         expected_df=expected_full_array_df,
         filters_params=ValueFilters(bulk_filters),
+        describe=describe,
     )
 
     await assert_read_bulk(
@@ -607,6 +649,7 @@ async def test_multi_chunk_case_array(bulk_storage_mock: BlobStorageBase, test_t
         columns=[],
         expected_df=reference_df[natsorted(cols)].loc[reference_df["MD"] >= 500],
         filters_params=ValueFilters(bulk_filters),
+        describe=describe,
     )
 
     bulk_filters_gr = [
@@ -618,13 +661,15 @@ async def test_multi_chunk_case_array(bulk_storage_mock: BlobStorageBase, test_t
         columns=["ARR[16:26]"],
         expected_df=expected_full_array_df_gr,
         filters_params=ValueFilters(bulk_filters_gr),
+        describe=describe,
     )
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("describe", describe_params)
 @pytest.mark.parametrize(["accept_type", "orient"], format_params)
 async def test_multi_chunk_case_filtering(
-    bulk_storage_mock: BlobStorageBase, test_tenant, accept_type, orient: JSONOrient
+    bulk_storage_mock: BlobStorageBase, test_tenant, accept_type, orient: JSONOrient, describe: bool
 ):
     # GIVEN df split into 2 chunks
     reference_df = generate_df(["A", "B", "C", "D", "E"], index=range(100))
@@ -650,7 +695,11 @@ async def test_multi_chunk_case_filtering(
         (reference_df["A"] > 350) & (reference_df["B"] < 850) & (reference_df["E"] >= 500)
     ]
     await assert_read_bulk(
-        **common_kwargs, columns=["B", "A"], expected_df=expected_df, filters_params=ValueFilters(bulk_filters)
+        **common_kwargs,
+        columns=["B", "A"],
+        expected_df=expected_df,
+        filters_params=ValueFilters(bulk_filters),
+        describe=describe,
     )
 
     bulk_filters_with_limits = [
@@ -667,6 +716,7 @@ async def test_multi_chunk_case_filtering(
         filters_params=ValueFilters(bulk_filters_with_limits),
         offset=10,
         limit=10,
+        describe=describe,
     )
 
     is_in_filter_values = [i for i in range(500, 600)]
@@ -679,7 +729,11 @@ async def test_multi_chunk_case_filtering(
         (reference_df["A"] > 350) & (reference_df["E"].isin(is_in_filter_values))
     ]
     await assert_read_bulk(
-        **common_kwargs, columns=["A", "E"], expected_df=expected_df, filters_params=ValueFilters(bulk_filters)
+        **common_kwargs,
+        columns=["A", "E"],
+        expected_df=expected_df,
+        filters_params=ValueFilters(bulk_filters),
+        describe=describe,
     )
 
 
@@ -741,9 +795,9 @@ async def test_read_bulk_shifted_multi_chunk_case(
     }
 
     # without offset/limit
-    await assert_read_bulk(**common_kwargs, expected_df=reference_df[["MD"]], columns=["MD"])
-    await assert_read_bulk(**common_kwargs, expected_df=reference_df[["GR"]], columns=["GR"])
-    await assert_read_bulk(**common_kwargs, expected_df=reference_df[["DEN"]], columns=["DEN"])
+    await assert_read_bulk(**common_kwargs, expected_df=md_df, columns=["MD"])
+    await assert_read_bulk(**common_kwargs, expected_df=switched_gr_df, columns=["GR"])
+    await assert_read_bulk(**common_kwargs, expected_df=switched_den_df, columns=["DEN"])
     await assert_read_bulk(**common_kwargs, expected_df=reference_df[["MD", "DEN"]], columns=["MD", "DEN"])
     #
     # # with offset/limit
