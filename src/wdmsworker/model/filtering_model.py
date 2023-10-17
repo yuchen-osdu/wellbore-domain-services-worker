@@ -131,3 +131,11 @@ class BulkFilters:
     curves_are_array: bool | None  # TODO does really belongs here
     requested_columns: List[str] | None
     curves_order_requested: bool
+
+    def any_filter(self) -> bool:
+        """means index or value filters, regardless columns selections"""
+        return (
+            (self.value_filters and self.value_filters.has_filter())
+            or self.index_filters.offset is not None
+            or self.index_filters.limit is not None
+        )

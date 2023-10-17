@@ -157,7 +157,7 @@ def test_catalog_from_chunk_meta():
     assert catalog.record_id == "r_id"
     assert catalog.all_columns == {"A", "B", "C"}
     assert catalog.chunk_count == 3
-    assert catalog.all_columns_count == 3
+    assert catalog.nb_columns == 3
     assert not catalog.is_columns_slide_only({"A"})
     assert not catalog.is_columns_slide_only({"B"})
     assert catalog.is_columns_slide_only({"C"})

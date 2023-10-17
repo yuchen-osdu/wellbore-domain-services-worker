@@ -23,6 +23,7 @@ dependencies = [
     "pyarrow~=10.0.1",
     "natsort",
     "fastapi~=0.95.2",
+    "anyio<4",  # major 4 introduced breaking changes on exception management on task group
     "uvicorn",
     "opencensus",
     "requests>=2.31.0",

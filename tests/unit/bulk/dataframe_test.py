@@ -13,6 +13,7 @@
 # limitations under the License.
 import io
 from functools import reduce
+from datetime import datetime
 
 import pytest
 
@@ -31,12 +32,19 @@ from wdmsworker.bulk.dataframe import (
     load_df,
     expand_columns,
     basic_describe,
-    get_row_count_and_columns,
     dump_df,
     split_into_chunks,
+    columns_to_slices,
 )
 
 from wdmsworker.model.describe import DataframeBasicDescribe, ColumnDescribe
+
+
+def test_columns_to_slices():
+    assert {"A", "C[1:6]"} == set(columns_to_slices(["A", "C[1]", "C[4]", "C[3]", "C[2]", "C[2]", "C[6]"]))
+    assert {"A", "C[1]", "C[4]", "C[3]", "C[8]", "C[2]", "C[6]"} == set(
+        columns_to_slices(["A", "C[1]", "C[4]", "C[3]", "C[8]", "C[2]", "C[6]"])
+    )
 
 
 @pytest.mark.parametrize("columns", [["A", "B", "C"], [0, 1, 3], [0.0, 1.1, 7.1]])
@@ -116,6 +124,32 @@ def test_group_curve_columns_handle_one_million_columns():
     r = group_curve_columns((f"C{j}[{i}]" for i in range(int(size / 1000)) for j in range(1000)), True)
     assert len(r) == 1000
     assert len(r["C500"]) == 1000
+
+
+# @pytest.mark.skip
+@pytest.mark.slow
+@pytest.mark.perf
+def test_columns_to_slides_handle_many_columns():
+    size = 300_000
+
+    # one array
+    columns = (f"C[{i}]" for i in range(size))
+    ts = datetime.now()
+    columns_to_slices(columns)
+    print("single array columns to slices took ", (datetime.now() - ts).total_seconds())
+
+    # many columns no array
+    columns = (f"C{i}" for i in range(size))
+    ts = datetime.now()
+    columns_to_slices(columns)
+    print("no array many columns to slices took ", (datetime.now() - ts).total_seconds())
+
+    # one array split into 500 columns chunks
+    columns_list = [[f"C[{i}]" for i in range(start, start + 500)] for start in range(0, size, 500)]
+    ts = datetime.now()
+    for columns in columns_list:
+        columns_to_slices(columns)
+    print("one array, several chunks columns to slices took ", (datetime.now() - ts).total_seconds())
 
 
 @pytest.mark.parametrize(
@@ -293,24 +327,6 @@ def test_basic_describe_on_empty():
     assert desc.curves == {}
     assert desc.rowCount == 0
     assert desc.reference.start_end_df().empty
-
-
-@pytest.mark.parametrize(
-    "df, expected_result",
-    [
-        ({"col1": [1, 2, 3], "col2": [4, 5, 6]}, (3, ["col1", "col2"])),
-        (None, (0, [])),
-    ],
-)
-def test_get_row_count_and_columns(df, expected_result):
-    # Create a test DataFrame
-    test_df = pd.DataFrame(df)
-
-    # Call the function and store the result
-    result = get_row_count_and_columns(test_df)
-
-    # Assert that the result is a tuple containing the expected number of rows and columns
-    assert result == expected_result
 
 
 @pytest.mark.parametrize(

@@ -25,7 +25,7 @@ from ..dependencies import (
     tenant_dependency,
 )
 from ..model.json_orient import JSONOrient
-from ..model.error_model import LimitExceededErrorResponse
+from ..model.error_model import to_json_response, TooLargeReadErrorResponse
 from ..model.mime_types import MimeType, MimeTypes
 from .catalog import async_load_bulk_catalog_with_blob_storage
 from ..logger import get_logger
@@ -43,7 +43,7 @@ read_bulk_router = APIRouter()
         status.HTTP_412_PRECONDITION_FAILED: {"description": "not supported data format"},
         status.HTTP_413_REQUEST_ENTITY_TOO_LARGE: {
             "description": "the resource requested exceeds the limit.",
-            "model": LimitExceededErrorResponse,
+            "model": TooLargeReadErrorResponse,
         },
     },
 )
@@ -64,6 +64,8 @@ async def get_bulk_route(
     storage=Depends(blob_storage_dependency),
     tenant=Depends(tenant_dependency),
 ):
+    if accept_type == MimeTypes.ANY:
+        accept_type = MimeTypes.PARQUET
     try:
         catalog = await async_load_bulk_catalog_with_blob_storage(storage, tenant, record_id, bulk_id)
     except Exception as e:
@@ -77,10 +79,10 @@ async def get_bulk_route(
         if curves:
             curve_selection = list(dict.fromkeys(curves))
 
-    bulk_filters = ValueFilters(extract_bulk_filters(bulk_filter_query))
+    value_filters = ValueFilters(extract_bulk_filters(bulk_filter_query))
 
     # if describe without filters, the catalog is enough to answer:
-    if catalog and describe and not bulk_filters.has_filter():
+    if catalog and describe and not value_filters.has_filter():
         nb_rows, columns = catalog.describe(offset=offset, limit=limit, column_selection=curve_selection)
         return _build_describe_response(nb_rows, columns)
 
@@ -96,12 +98,12 @@ async def get_bulk_route(
                 offset,
                 limit,
                 curve_selection,
-                bulk_filters,
+                value_filters,
                 describe,
             )
         else:
             read_result = await reader.read_bulk(
-                storage, tenant, catalog, accept_type, orient, offset, limit, curve_selection, bulk_filters, describe
+                storage, tenant, catalog, accept_type, orient, offset, limit, curve_selection, value_filters, describe
             )
         return Response(read_result.content, media_type=read_result.mime_type.type)
 
@@ -110,7 +112,12 @@ async def get_bulk_route(
     except errors.CurvesNotFoundError as e:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(e))
     except errors.LimitExceededError as e:
-        return LimitExceededErrorResponse.from_exception(e).to_response()
+        response_too_large = TooLargeReadErrorResponse.construct(message=e.message)
+        if catalog is not None:
+            response_too_large.set_bulk_description(
+                catalog.nb_rows, catalog.nb_columns, catalog.get_chunk_columns_slices()
+            )
+        return to_json_response(response_too_large, status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
     except (
         errors.InvalidParameterError,
         errors.FilteringError,
