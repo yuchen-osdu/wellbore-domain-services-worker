@@ -14,7 +14,7 @@
 
 from io import BytesIO
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Iterable
 from itertools import repeat, chain
 from asyncio import gather, create_task
 
@@ -42,9 +42,7 @@ from .dataframe import (
     sort_dataframe_column,
     re_column_array,
     reorder_dataframe_columns,
-    expand_columns,
     filter_by_index,
-    get_row_count_and_columns,
     dump_df,
 )
 
@@ -137,26 +135,34 @@ async def read_bulk_outside_session(
     limit: int | None = None,
     curves_selection: ColumnSelection | None = None,
     filters_params: ValueFilters | None = None,
-    describe: bool | None = None,
+    describe: bool = False,
 ) -> ReadResult:
-    bulk_read_filters = _validate_parameters_no_catalog(offset, limit, None, filters_params)
-
     chunk_path = await get_chunk_path_outside_session(storage, tenant, record_id, bulk_id)
-    if curves_selection is None:
+    if curves_selection is None and not describe:
+        bulk_read_filters = BulkFilters(
+            index_filters=IndexFilters(offset, limit),
+            value_filters=filters_params,
+            curves_are_array=None,
+            requested_columns=None,
+            curves_order_requested=False,
+        )
         # non curves filter
         return await _build_response_from_single_chunk(
-            storage, tenant, chunk_path, accept_type, orient, filters=bulk_read_filters, describe=describe
+            storage, tenant, chunk_path, accept_type, orient, filters=bulk_read_filters
         )
 
+    # TODO find a way to enable direct forward without loading dataframe twice
     # there's no curves selection so need to load dataframe entirely
     df = await _load_single_dataframe_from_storage(storage, tenant, chunk_path)
     catalog = BulkCatalog.from_single_dataframe(record_id, chunk_path, df)
 
-    _, bulk_read_filters = _validate_parameters(catalog, offset, limit, curves_selection, filters_params)
+    _, bulk_read_filters = _validate_parameters(
+        catalog, offset, limit, curves_selection, filters_params, describe=describe
+    )
 
     df = _dataframe_filters_and_reorder_columns(df, bulk_read_filters)
     if describe:
-        return _build_response_from_describe(*get_row_count_and_columns(df))
+        return _build_response_from_describe(len(df), bulk_read_filters.requested_columns or list(catalog.all_columns))
     return await _build_response_from_df(df, accept_type, orient)
 
 
@@ -171,7 +177,7 @@ async def read_bulk(
     limit: int | None = None,
     curves_selection: ColumnSelection | None = None,
     filters_params: ValueFilters | None = None,
-    describe: bool | None = None,
+    describe: bool = False,
 ) -> ReadResult:
     """
     attempt a fast track read on some circumstances, for now:
@@ -198,38 +204,34 @@ async def read_bulk(
              TooManyColumnsRequested,
              TooManyValuesRequested
     """
-
     columns_to_load, bulk_read_filters = _validate_parameters(
-        bulk_catalog, offset, limit, curves_selection, filters_params
+        bulk_catalog, offset, limit, curves_selection, filters_params, describe=describe
     )
     base_chunk_path = storage_path_builder.record_path_level_0(bulk_catalog.record_id, base_directory=None)
 
-    # ---------- case of single chunk -----------------------------
-    # TODO try to use direct forward in case requested columns == single chunk all columns
-    if bulk_catalog.chunk_count == 1:  # only one chunk
-        for chunk_path in bulk_catalog.get_chunk_paths():
-            if bulk_catalog.is_single_file_chunk(chunk_path):
-                return await _build_response_from_single_chunk(
-                    storage,
-                    tenant,
-                    storage_path_builder.join(base_chunk_path, chunk_path),
-                    accept_type,
-                    orient,
-                    columns_to_load=columns_to_load,
-                    filters=bulk_read_filters,
-                    describe=describe,
-                )
-
-    # If describe is activated, we will load only necessary columns, the one used by the filter
-    # It involves creating a new filter in order to set the minimum set of columns to load
-
-    describe_filter, filtered_columns_to_load = await _describe_filter_and_columns(bulk_read_filters, describe)
-
-    actual_columns_to_load = filtered_columns_to_load or columns_to_load
-
     # figures out the number of chunks involved, only one path each
     with timeit("bulk_catalog.filter_group_for_columns"):
-        chunk_groups = bulk_catalog.filter_group_for_columns(actual_columns_to_load)
+        chunk_groups = bulk_catalog.filter_group_for_columns(columns_to_load)
+
+    if (
+        not describe
+        and not bulk_read_filters.any_filter()
+        and len(chunk_groups) == 1
+        and len(chunk_groups[0].paths) == 1
+    ):
+        # case single chunk with potential direct forward
+        chunk_path = chunk_groups[0].paths[0]
+        if bulk_catalog.is_single_file_chunk(chunk_path):
+            return await _build_response_from_single_chunk(
+                storage,
+                tenant,
+                storage_path_builder.join(base_chunk_path, chunk_path),
+                accept_type,
+                orient,
+                columns_to_load=columns_to_load,
+                columns_inside_chunk=chunk_groups[0].labels,
+                filters=bulk_read_filters,
+            )
 
     # not putting offset, limit here because each chunk may not cover the full bulk index
     # by the way it might be possible to do something before concat
@@ -240,7 +242,7 @@ async def read_bulk(
             storage,
             tenant,
             [storage_path_builder.join(base_chunk_path, p) for p in chunk_group.paths],
-            [col for col in actual_columns_to_load if col in chunk_group.labels],
+            [col for col in columns_to_load if col in chunk_group.labels],
         )
         for chunk_group in chunk_groups
     ]
@@ -256,44 +258,17 @@ async def read_bulk(
         final_df = pd.concat(chain(repeat(pd.DataFrame(index=global_index), 1), dfs), axis=1, copy=False)
 
     # drop extra columns, reorder columns if needed, then apply values filters and index filters
-    final_df = _dataframe_filters_and_reorder_columns(final_df, describe_filter or bulk_read_filters)
+    final_df = _dataframe_filters_and_reorder_columns(final_df, bulk_read_filters)
 
     if describe:
         # The list of column of the dataframe is reduced compared to what asked the user,
         # only columns used in filter were loaded.
-        nb_row, columns = await _describe_force_columns(bulk_read_filters, final_df)
-        return _build_response_from_describe(nb_row, columns)
+        return _build_response_from_describe(
+            len(final_df), bulk_read_filters.requested_columns or list(bulk_catalog.all_columns)
+        )
+
     # build the final response by serializing the dataframe into requested format
     return await _build_response_from_df(final_df, accept_type, orient)
-
-
-async def _describe_force_columns(bulk_read_filters: BulkFilters, final_df: pd.DataFrame) -> Tuple[int, List[str]]:
-    """When describe is computed with filters, we get a smaller dataframe with less columns,
-    si we need to force the columns before returnung the columns"""
-    nb_row, columns = get_row_count_and_columns(final_df)
-    if (
-        bulk_read_filters.value_filters
-        and bulk_read_filters.value_filters.has_filter()
-        and bulk_read_filters.requested_columns
-    ):
-        columns = bulk_read_filters.requested_columns
-    return nb_row, columns
-
-
-def _validate_parameters_no_catalog(
-    offset: int | None,
-    limit: int | None,
-    curves_selection: ColumnSelection | None,
-    bulk_filters: ValueFilters | None = None,
-) -> BulkFilters:
-    requested_columns = None if curves_selection is None else expand_columns(curves_selection)
-    return BulkFilters(
-        index_filters=IndexFilters(offset, limit),
-        value_filters=bulk_filters,
-        curves_are_array=None,
-        requested_columns=requested_columns,
-        curves_order_requested=True if curves_selection else False,
-    )
 
 
 def _validate_parameters(
@@ -301,20 +276,28 @@ def _validate_parameters(
     offset: int | None,
     limit: int | None,
     curves_selection: ColumnSelection | None,
-    bulk_filters: ValueFilters | None = None,
+    value_filters: ValueFilters | None = None,
+    describe: bool = False,
 ) -> tuple[list[str], BulkFilters]:
     """
-    validate case for fast track. It will throw ReadFastTrackCaseNotSupportedException if not supported given the
-     parameters provided.
      It will throw either BulkCurvesNotFound, TooManyColumnsRequested or TooManyValuesRequested respectively if the
-     curves selection doesn't match a column, if too many columns requested or involves too many values.
-    return: tuple columns_to_load, BulkFilters. If columns_to_load is
+     curves selection doesn't match a column, if too many columns requested or involves too many values. Except if
+     describe is `True` without filters.
+    :param bulk_catalog:
+    :param offset:
+    :param limit:
+    :param curves_selection:
+    :param value_filters:
+    :param describe:
+    :return: tuple columns_to_load, BulkFilters.
     """
     try:
         index_filters = IndexFilters(offset, limit)
     except ValueError as e:
         raise errors.InvalidParameterError from e
 
+    has_value_filters = bool(value_filters and value_filters.has_filter())
+    columns_with_filter = value_filters.columns if value_filters else set()
     any_curves_array = None
     # ---------- first check if fast track can be applied -----------------------------
     # get the actual column to fetch from the given curve selection
@@ -330,14 +313,36 @@ def _validate_parameters(
         requested_columns = natsorted(bulk_catalog.all_columns)
 
     extra_filtering_cols = set()
-    if bulk_filters and bulk_filters.has_filter():
-        invalid_columns = bulk_filters.columns - bulk_catalog.all_columns
+    if has_value_filters:
+        invalid_columns = columns_with_filter - bulk_catalog.all_columns
         if invalid_columns:
             raise FilteringError(f"Requested columns '{list(invalid_columns)}' for filtering do not exist")
         # add columns needed for filtering which are not yet in columns
         extra_filtering_cols = {
-            filtering_col for filtering_col in bulk_filters.columns if filtering_col not in set(requested_columns)
+            filtering_col for filtering_col in columns_with_filter if filtering_col not in set(requested_columns)
         }
+    columns_to_load = [*requested_columns, *extra_filtering_cols]
+
+    if describe:
+        if has_value_filters:
+            # If describe is activated, we will load only necessary columns, the ones used by the filter
+            # in order to set the minimum set of columns to load
+            columns_to_load = list(columns_with_filter)
+
+            # in case of describe only matter data needed to load to apply value filtering if any requested
+            total_values_unfiltered = bulk_catalog.nb_rows * len(columns_to_load)
+            if has_value_filters and total_values_unfiltered > constants.READ_MAX_TOTAL_VALUES_COUNT_UNFILTERED:
+                raise errors.TooManyValuesError(
+                    total_values_unfiltered, constants.READ_MAX_TOTAL_VALUES_COUNT_UNFILTERED
+                )
+
+        return columns_to_load, BulkFilters(
+            index_filters=IndexFilters(offset, limit),
+            value_filters=value_filters,
+            curves_are_array=any_curves_array,
+            requested_columns=requested_columns,
+            curves_order_requested=False,
+        )
 
     # validate the column count requested
     if len(requested_columns) > constants.READ_MAX_COLUMNS_COUNT:
@@ -350,18 +355,14 @@ def _validate_parameters(
 
     # validate the values after filtering
     filtered_row_count = index_filters.row_count(bulk_catalog.nb_rows)
-    index_filters.update_from_row_count(filtered_row_count)
-
     total_values_filtered = filtered_row_count * len(requested_columns)
 
     if total_values_filtered > constants.READ_MAX_TOTAL_VALUES_COUNT_FILTERED:
         raise errors.TooManyValuesError(total_values_filtered, constants.READ_MAX_TOTAL_VALUES_COUNT_FILTERED)
 
-    columns_to_load = [*requested_columns, *extra_filtering_cols]
-
     return columns_to_load, BulkFilters(
         index_filters=IndexFilters(offset, limit),
-        value_filters=bulk_filters,
+        value_filters=value_filters,
         curves_are_array=any_curves_array,
         requested_columns=requested_columns,
         curves_order_requested=True if curves_selection else False,
@@ -460,42 +461,26 @@ async def _build_response_from_single_chunk(
     orient: JSONOrient | None,
     *,
     columns_to_load=None,
+    columns_inside_chunk: Iterable[str] | None = None,
     filters: BulkFilters,
-    describe: bool | None = None,
 ) -> ReadResult:
+    columns_inside_chunk = set(columns_inside_chunk) if columns_inside_chunk is not None else set()
     # only one chunk
     if (
-        describe  # describe prevents the fast track, we need to get the dataframe
-        or filters.curves_order_requested
-        or filters.index_filters.offset
-        or filters.index_filters.limit
+        (filters.requested_columns and columns_inside_chunk != set(filters.requested_columns))
+        # if columns requested is same than the ones in the chunk, direct forward can be used
+        or filters.any_filter()
         or accept_type == MimeTypes.JSON
-        or filters.value_filters
-        and filters.value_filters.has_filter()
     ):
-        # possible optimization when calling with describe
-        # - if columns_to_load is empty:    it means catalog is not available so no optim possible
-        # - if columns_to_load is not empty
-        #   - if filter is not empty:   we can load only index + col on which filters apply, apply filter,
-        #     get nb row and use col list from columns_to_load
-        describe_filter = None
-        filtered_columns_to_load = None
-        if columns_to_load and describe:
-            describe_filter, filtered_columns_to_load = await _describe_filter_and_columns(filters, describe)
+        df = await _load_single_dataframe_from_storage(storage, tenant, blob_path, columns_to_load)
+        df = _dataframe_filters_and_reorder_columns(df, filters)
 
-        df = await _load_single_dataframe_from_storage(
-            storage, tenant, blob_path, filtered_columns_to_load or columns_to_load
-        )
-        df = _dataframe_filters_and_reorder_columns(df, describe_filter or filters)
-        if describe:
-            nb_row, columns = get_row_count_and_columns(df)
-            if columns_to_load:  # Need to use columns from the original filter
-                nb_row, columns = await _describe_force_columns(filters, df)
-            return _build_response_from_describe(nb_row, columns)
+        # TODO try load meta only and columns to potentially save full data load and dump operations
+        #  checking columns inside dataframe match the requested ones, could still save the serialisation
         return await _build_response_from_df(df, accept_type, orient)
-    else:
-        # easy fast track, just forward it
-        return await _forward_parquet(storage, tenant, blob_path)
+
+    # optimized read, just direct forward the chunk as it
+    return await _forward_parquet(storage, tenant, blob_path)
 
 
 # @capture_timings('_forward_parquet')
@@ -516,23 +501,3 @@ def build_json_str_from_describe(nb_row: int, columns: List[str]) -> str:
 
 def _build_response_from_describe(nb_row: int, columns: List[str]) -> ReadResult:
     return ReadResult(build_json_str_from_describe(nb_row, columns), MimeTypes.JSON)
-
-
-async def _describe_filter_and_columns(
-    bulk_read_filters: BulkFilters, describe: bool | None
-) -> Tuple[BulkFilters | None, List[str] | None]:
-    """If describe is activated, we will load only necessary columns, the ones used by the filter
-    It involves creating a new filter in order to set the minimum set of columns to load"""
-
-    describe_filter = None
-    filtered_columns_to_load = None
-    if describe and bulk_read_filters.value_filters and bulk_read_filters.value_filters.has_filter():
-        filtered_columns_to_load = list(bulk_read_filters.value_filters.columns)
-        describe_filter = BulkFilters(
-            index_filters=bulk_read_filters.index_filters,
-            value_filters=bulk_read_filters.value_filters,
-            curves_are_array=bulk_read_filters.curves_are_array,
-            requested_columns=filtered_columns_to_load,
-            curves_order_requested=bulk_read_filters.curves_order_requested,
-        )
-    return describe_filter, filtered_columns_to_load

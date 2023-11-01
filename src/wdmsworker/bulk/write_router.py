@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from ..capture_timings import capture_timings
 from ..dependencies import blob_storage_dependency, tenant_dependency, content_type_dependency
 from ..model.describe import DataframeBasicDescribe
-from ..model.error_model import ErrorWithTypeResponse, LimitExceededErrorResponse
+from ..model.error_model import ErrorWithTypeResponse, LimitExceededErrorResponse, to_json_response
 from ..model.mime_types import MimeType
 from . import writer
 from . import errors as exc
@@ -41,6 +41,7 @@ class WriteBulkResponse(BaseModel):
 
 @write_bulk_router.post(
     "/data/{record_id}/session/{session_id}",
+    response_model=WriteChunkResponse,
     responses={
         status.HTTP_422_UNPROCESSABLE_ENTITY: {"description": "invalid content"},
         status.HTTP_413_REQUEST_ENTITY_TOO_LARGE: {
@@ -57,7 +58,7 @@ async def post_bulk_chunk_in_session_route(
     content_type: MimeType = Depends(content_type_dependency),
     storage=Depends(blob_storage_dependency),
     tenant=Depends(tenant_dependency),
-) -> WriteChunkResponse:
+):
     try:
         return await writer.write_bulk_data_in_session(
             storage, tenant, await request.body(), content_type, record_id, session_id, reference_curve=reference
@@ -68,11 +69,15 @@ async def post_bulk_chunk_in_session_route(
     except (exc.TooManyValuesError, exc.TooManyValuesError) as e:
         get_logger().error(f"too bug dataframe posted: {e}")
         # TODO this might actually be done/solved here, better be strict for now ...
-        return LimitExceededErrorResponse.from_exception(e).to_response(additional_description="Data chunk too large")
+        return to_json_response(
+            LimitExceededErrorResponse.from_exception(e, additional_description="Data chunk too large"),
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+        )
 
 
 @write_bulk_router.post(
     "/data/{record_id}",
+    response_model=WriteBulkResponse,
     responses={
         status.HTTP_400_BAD_REQUEST: {"description": "bad request"},
         status.HTTP_404_NOT_FOUND: {"description": "resource not found"},
@@ -90,7 +95,7 @@ async def post_bulk_data_route(
     content_type: MimeType = Depends(content_type_dependency),
     storage=Depends(blob_storage_dependency),
     tenant=Depends(tenant_dependency),
-) -> WriteBulkResponse:
+):
     try:
         bulk_id, bulk_description = await writer.write_bulk(
             storage, tenant, await request.body(), content_type, record_id, reference
@@ -104,8 +109,11 @@ async def post_bulk_data_route(
     except (exc.TooManyValuesError, exc.TooManyValuesError) as e:
         get_logger().error(f"too bug dataframe posted: {e}")
         # TODO this might actually be done/solved here, better be strict for now ...
-        return LimitExceededErrorResponse.from_exception(e).to_response(
-            additional_description="Bulk data is too large and must be split into smaller chunks"
+        return to_json_response(
+            LimitExceededErrorResponse.from_exception(
+                e, additional_description="Bulk data is too large and must be split into smaller chunks"
+            ),
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
         )
     except exc.BulkUploadError as e:
         get_logger().exception(f"exception at upload data to blob storage {e}")
@@ -136,8 +144,9 @@ async def session_complete_route(
         )
         return WriteBulkResponse.construct(bulkid=bulk_id, describe=bulk_description)
     except exc.BulkCommitNoDataError as e:
-        return ErrorWithTypeResponse(errorType=e.errorType, message=e.description).to_response(
-            status.HTTP_422_UNPROCESSABLE_ENTITY
+        return to_json_response(
+            ErrorWithTypeResponse(errorType=e.errorType, message=e.description),
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         )
     except (exc.BulkCommitError, exc.BulkValidationError) as e:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))

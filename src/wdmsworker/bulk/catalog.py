@@ -30,7 +30,14 @@ from osdu.core.api.storage.blob_storage_base import BlobStorageBase
 from osdu.core.api.storage.exceptions import ResourceNotFoundException
 
 from . import storage_path_builder
-from .dataframe import ColumnSelection, get_requested_columns, sort_column_labels, group_curve_columns, dump_to_parquet
+from .dataframe import (
+    ColumnSelection,
+    get_requested_columns,
+    sort_column_labels,
+    group_curve_columns,
+    dump_to_parquet,
+    columns_to_slices,
+)
 from .chunk_meta import ChunkMeta
 from ..capture_timings import timeit, capture_timings
 from .storage_path_builder import catalog_file_path, record_relative_path, join
@@ -170,7 +177,7 @@ class BulkCatalog:
         return self._record_id
 
     @property
-    def all_columns_count(self) -> int:
+    def nb_columns(self) -> int:
         """
         Return number of columns contained in bulk data
         """
@@ -226,13 +233,30 @@ class BulkCatalog:
 
     @property
     def chunk_count(self) -> int:
-        # TODO by design, a path should not appears twice but nothing prevent to construct a catalog with the same
+        # TODO by design, a path should not appear twice but nothing prevent to construct a catalog with the same
         #  chunk path more than once, so let's use a set container for now
         return len(set(self.get_chunk_paths()))
 
     def get_chunk_paths(self) -> Iterator[str]:
         """iterator over all paths, not path are provided relative to the record root dir"""
         return chain.from_iterable((col_group.paths for col_group in self._columns))
+
+    def get_chunk_columns(self) -> Iterator[Tuple[str, Set[str]]]:
+        """
+        :return: iterator [chunk path, chunk column labels]
+        """
+        # by design and conflict resolution rules, chunk cannot appear twice
+        for col_group in self._columns:
+            for p in col_group.paths:
+                yield p, col_group.labels
+
+    def get_chunk_columns_slices(self) -> Iterator[List[str]]:
+        """
+        :return: iterator list of columns of each chunk using slice expression
+        """
+        # by design and conflict resolution rules, chunk cannot appear twice
+        for col_group in self._columns:
+            yield columns_to_slices(col_group.labels)
 
     def get_absolut_chunk_paths(self) -> Iterator[str]:
         """same as `get_chunk_path but with absolut path"""

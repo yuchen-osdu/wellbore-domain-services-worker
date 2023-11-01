@@ -67,7 +67,7 @@ def assert_frame_equal(right, left):
     pd.testing.assert_frame_equal(right, left)
 
 
-def assert_dataframe_from_content(expected_df, content, accept_type, orient="split"):
+def assert_dataframe_from_content(expected_df, content, accept_type, orient="split", enforce_column_order=False):
     if accept_type == MimeTypes.PARQUET:
         actual_df = pd.read_parquet(BytesIO(content))
     else:
@@ -76,5 +76,11 @@ def assert_dataframe_from_content(expected_df, content, accept_type, orient="spl
         # corner case, when there's no row, just checking columns
         assert list(expected_df.columns) == list(actual_df.columns)
     else:
-        pd.testing.assert_frame_equal(expected_df, actual_df, check_dtype=accept_type == MimeTypes.PARQUET)
-    # check_dtype to False as json may lose strict type
+        # check_dtype to False as json may lose strict type
+        if enforce_column_order:
+            pd.testing.assert_frame_equal(expected_df, actual_df, check_dtype=accept_type == MimeTypes.PARQUET)
+        else:
+            assert set(expected_df.columns) == set(actual_df.columns)
+            pd.testing.assert_frame_equal(
+                expected_df, actual_df[expected_df.columns], check_dtype=accept_type == MimeTypes.PARQUET
+            )

@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from .generate_data import generate_df, generate_df_dtype
+from .generate_data import generate_df, generate_df_dtype, assert_frame_equal
 
 
 @pytest.fixture
@@ -226,8 +226,45 @@ def test_too_many_values_requested(test_client, record_id: str, session_id: str)
     assert response.status_code == 413
     response_json = response.json()
     assert response_json["message"]
-    assert response_json["limit"] == 10_000_000
-    assert response_json["actual"] == 3 * row_count
+    assert response_json["errorType"] == "READ_REQUEST_TOO_LARGE"
+    assert response_json["bulkDescription"]["totalNumberOfRows"] == row_count
+    assert response_json["bulkDescription"]["totalNumberOfColumns"] == 3
+    assert response_json["limits"]["values"] == 10_000_000
+    assert response_json["limits"]["columns"] == 3_000
+
+    curves_set = sorted(p["curves"][0] for p in response_json["bulkDescription"]["partitions"])
+    assert curves_set == ["A", "B", "C"]
+
+
+def test_too_many_values_requested_workflow(test_client, record_id: str, session_id: str):
+    bulk_id, _, expected_dfs = _send_chunks_and_commit(
+        test_client,
+        [(["x", "y"], [0, 1]), ([f"A[{i}]" for i in range(2500)], [0, 1]), ([f"B[{i}]" for i in range(2500)], [0, 1])],
+        record_id,
+        session_id,
+        "application/parquet",
+        "overwrite",
+    )
+
+    expected_df = pd.concat(expected_dfs, axis=1)
+
+    # WHEN read all
+    response = test_client.get(
+        f"/data/{record_id}/{bulk_id}",
+        headers={"accept": "application/parquet"},
+    )
+    assert response.status_code == 413
+    response_json = response.json()
+    assert response_json["bulkDescription"]["totalNumberOfRows"] == 2
+    assert response_json["bulkDescription"]["totalNumberOfColumns"] == 5_002
+
+    dfs = []
+    for c in (p["curves"] for p in response_json["bulkDescription"]["partitions"]):
+        data_response = test_client.get(f"/data/{record_id}/{bulk_id}", params={"curves": ",".join(c)})
+        assert data_response.status_code == 200
+        dfs.append(_create_df_from_response(data_response))
+
+    assert_frame_equal(expected_df, pd.concat(dfs, axis=1), check_column_order=False)
 
 
 def test_reference_not_exist_in_bulk(test_client, record_id: str, session_id: str):
