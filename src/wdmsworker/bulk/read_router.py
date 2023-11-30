@@ -55,8 +55,7 @@ async def get_bulk_route(
     limit: int | None = Query(default=None, ge=1),
     curves: str | None = Query(default=None),
     describe: bool | None = Query(default=False),  # TODO add regex='...'
-    bulk_filter_query: List[str]
-    | None = Query(
+    bulk_filter_query: List[str] | None = Query(
         default=None, alias="filter", regex='^(".+"|[^:]+):(' + "|".join(BulkValueFilterOperator.values()) + "):.*$"
     ),
     accept_type: MimeType = Depends(accept_dependency),

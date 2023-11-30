@@ -5,11 +5,11 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "wdmsworker"
 authors = [{name = "WDMS team"}]
-description = "A python (3.10) WDMS bulk worker service."
+description = "WDMS bulk worker service."
 readme = "README.md"
 license = {file = "LICENSE"}
 keywords = ["python", "wdms", "bulk"]
-requires-python = "~=3.10"
+requires-python = ">=3.10"
 version = "0.1.0"
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -17,10 +17,11 @@ classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
 ]
 dependencies = [
     "pandas~=1.5.2",
-    "pyarrow~=10.0.1",
+    "pyarrow>=14.0.1",
     "natsort",
     "fastapi~=0.95.2",
     "anyio<4",  # major 4 introduced breaking changes on exception management on task group
@@ -42,6 +43,7 @@ test = [
     "requests",  # based http client for the service tests
     "httpx",  # used by FastAPI/starlette TestClient
     "fsspec",  # local blob storage
+    "certifi>=2023.7.22"
 ]
 dev = [
     "wdmsworker[test]",  # dependencies for tests
@@ -63,6 +65,9 @@ az = [
     "opencensus-ext-azure",
     "osdu-core-lib-python-azure==3.0.3",
     "opencensus-ext-logging",
+    "certifi>=2023.7.22",
+    "aiohttp>=3.8.0",
+    "msal>=1.24.1 "
 ]
 
 aws = [
@@ -96,7 +101,7 @@ ignore_missing_imports = "True"
 
 [tool.black]
 line-length = 120
-target-version = ['py310']
+target-version = ['py311']
 # Preview allows to split long strings
 preview = true
 exclude = '''

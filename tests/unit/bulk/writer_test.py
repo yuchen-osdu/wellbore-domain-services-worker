@@ -641,6 +641,83 @@ async def test_commit_session_update_with_conflict(
     pd.testing.assert_frame_equal(actual_df, expected_df)
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "use_reference,set_reference_in_chunk",
+    [(True, True), (True, False), (False, False)],
+    ids=["with_ref", "partial_ref", "without_ref"],
+)
+# flags to set the reference_curve when calling commit_session and/or write_chunk
+@pytest.mark.parametrize("delete_chunk_index", [True, False], ids=["chunk_index_deletion", ""])
+# if True, will random deletes some index and/or reference dataframe associated to some chunks. Session commit should
+# complete successfully without it, the drawback should only be a less efficient commit
+@pytest.mark.parametrize("simulate_previous_with_dask", [True, False], ids=["previous_is_dask", "previous_is_wrk"])
+async def test_resolve_conflict_on_top_of_previous_conflict(
+    bulk_storage_mock: BlobStorageBase,
+    test_tenant,
+    record_id,
+    session_id,
+    use_reference: bool,
+    set_reference_in_chunk: bool,
+    delete_chunk_index: bool,
+    simulate_previous_with_dask: bool,
+):
+    # push data other different column
+    df_version_0 = pd.DataFrame({c: ["previous"] * 3 for c in ["a", "b"]}, index=[4, 5, 6])
+    df_version_0["MD"] = [9.0, 10.0, 11.0]
+    previous_bulk_id, _ = await commit_chunks(
+        bulk_storage_mock,
+        test_tenant,
+        record_id,
+        None,
+        df_version_0,
+        False,
+        False,
+        reference=None,
+        delete_chunk_index="all" if delete_chunk_index else "none",
+        delete_single_bulk_meta=delete_chunk_index,
+        force_session_single_chunk=True,
+        simulate_dask_conflict_resolve=simulate_previous_with_dask,
+    )
+
+    df_version_1 = pd.DataFrame({c: [c] * 5 for c in ["a", "b", "c"]})
+    df_version_1["MD"] = [float(i) for i in range(5)]
+
+    bulk_id, describe = await commit_chunks(
+        bulk_storage_mock,
+        test_tenant,
+        record_id,
+        session_id,
+        [df_version_1],
+        False,
+        False,
+        reference="MD" if use_reference else None,
+        delete_chunk_index="random" if delete_chunk_index else "none",
+        commit_mode="update",
+        previous_bulk_id=previous_bulk_id,
+    )
+
+    assert bulk_id
+    assert describe.curves == {"MD": 1, "a": 1, "b": 1, "c": 1}
+    assert describe.rowCount == 7
+
+    if use_reference:
+        assert describe.reference.name == "MD"
+        assert describe.reference.start_end_values() == [0.0, 11.0]
+    else:
+        assert describe.reference.start_end_values() == [0, 6]
+
+    assert not describe.reference.hasNan
+    assert not describe.reference.hasDuplicate
+    assert describe.reference.monotonicity == "increasing"
+
+    expected_df = df_version_1.combine_first(df_version_0)
+    actual_df = await read_all(bulk_storage_mock, test_tenant, record_id, bulk_id)
+    assert set(actual_df.columns.tolist()) == set(expected_df.columns.tolist())
+    actual_df = actual_df[expected_df.columns.tolist()]
+    pd.testing.assert_frame_equal(actual_df, expected_df)
+
+
 # ----------------------------------------------------------------------------------------------------------------
 # ----------------------------------------------------------------------------------------------------------------
 # ----------------------------------------------------------------------------------------------------------------
@@ -724,14 +801,12 @@ async def simulate_dask_commit(
             filename = generate_chunk_filename_dask_impl(ch)
             await storage.upload(tenant, storage_path_builder.join(root_session, f"{filename}.parquet"), ch_parquet)
 
-            meta_content = json.dumps(
-                {
-                    "columns": list(ch.columns),
-                    "dtypes": [str(dt) for dt in ch.dtypes],
-                    "nb_rows": len(ch.index),
-                    "index_hash": hashlib.sha1(ch.index.values).hexdigest(),
-                }
-            ).encode()
+            meta_content = json.dumps({
+                "columns": list(ch.columns),
+                "dtypes": [str(dt) for dt in ch.dtypes],
+                "nb_rows": len(ch.index),
+                "index_hash": hashlib.sha1(ch.index.values).hexdigest(),
+            }).encode()
 
             # later for catalog construction
             chunk_name_by_shape.setdefault(hashlib.sha1(".".join(sorted(ch.columns)).encode()).hexdigest(), []).append(
@@ -750,22 +825,18 @@ async def simulate_dask_commit(
     columns = []
     if as_conflicted:
         # in that case, only a single dir path is put inside the catalog, not one path per chunk
-        columns.append(
-            {
-                "labels": list(chunks[0].columns),  # all chunk have same column, take the first one then
-                "paths": [storage_path_builder.join("bulk", bulk_id, "data", conflicted_dir)],
-                "dtypes": [],
-            }
-        )
+        columns.append({
+            "labels": list(chunks[0].columns),  # all chunk have same column, take the first one then
+            "paths": [storage_path_builder.join("bulk", bulk_id, "data", conflicted_dir)],
+            "dtypes": [],
+        })
     else:
         for v in chunk_name_by_shape.values():
-            columns.append(
-                {
-                    "labels": list(v[0][0].columns),  # all chunk have same column, take the first one then
-                    "paths": [storage_path_builder.join("session", session_id, "data", f"{t[1]}.parquet") for t in v],
-                    "dtypes": [],
-                }
-            )
+            columns.append({
+                "labels": list(v[0][0].columns),  # all chunk have same column, take the first one then
+                "paths": [storage_path_builder.join("session", session_id, "data", f"{t[1]}.parquet") for t in v],
+                "dtypes": [],
+            })
 
     catalog_dict = {
         "recordId": record_id,

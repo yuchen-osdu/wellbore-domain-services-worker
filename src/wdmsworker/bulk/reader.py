@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from io import BytesIO
 from dataclasses import dataclass
 from typing import List, Iterable
 from itertools import repeat, chain
@@ -28,7 +27,7 @@ from ..logger import get_logger
 from ..capture_timings import timeit, capture_timings
 from ..model.json_orient import JSONOrient
 from ..model.mime_types import MimeType, MimeTypes
-from .chunk_meta import ChunkMeta
+from .chunk_storage import load_single_dataframe_from_storage, load_same_shape_dataframes_from_storage
 from .filtering import ValueFilters, apply_bulk_filters
 from .errors import FilteringError
 from . import errors
@@ -153,7 +152,7 @@ async def read_bulk_outside_session(
 
     # TODO find a way to enable direct forward without loading dataframe twice
     # there's no curves selection so need to load dataframe entirely
-    df = await _load_single_dataframe_from_storage(storage, tenant, chunk_path)
+    df = await load_single_dataframe_from_storage(storage, tenant, chunk_path)
     catalog = BulkCatalog.from_single_dataframe(record_id, chunk_path, df)
 
     _, bulk_read_filters = _validate_parameters(
@@ -382,65 +381,6 @@ async def _build_response_from_df(df: pd.DataFrame, accept_type: MimeType, orien
             raise errors.BulkUnprocessableError() from e
 
 
-async def _load_single_dataframe_from_storage(storage: BlobStorageBase, tenant, obj_path: str, columns_to_load=None):
-    """download and load a single dataframe selecting columns, and index based by position if offset and/or
-    limit are provided"""
-    # limit the concurrency to not overwhelm the service
-    with timeit("download dataframe from storage"):
-        content = await storage.download(tenant, obj_path)
-    with timeit("loading parquet from dataframe"):
-        content = BytesIO(content)
-        return pd.read_parquet(content, columns=columns_to_load)
-
-
-async def _expand_chunk_paths(
-    storage: BlobStorageBase,
-    tenant,
-    obj_paths: List[str],
-) -> List[str]:
-    """
-    the goal of this deal with dataframe saved by Dask with multi partition. In this case the path is not an actual
-    parquet file but a folder containing multiple parquet files. Unfortunately there's no way to know how many
-    files but listing objects in this folder with a name format `part.X.parquet`.
-    Usually there's a single folder to expand so the following is kept simple.
-    """
-    result = []
-    for p in obj_paths:
-        if ChunkMeta.is_a_chunk_file(p):
-            result.append(p)
-        else:
-            get_logger().debug(f"dask multipart detected for path {p}")
-            list_result = await storage.list_objects(tenant, prefix=storage_path_builder.join(p, "part."))
-            part_count = len([op for op in list_result if op.endswith("parquet")])  # for sure there's a better way
-            # iterate on count to ensure the order for the later concat
-            result.extend((storage_path_builder.join(p, f"part.{i}.parquet") for i in range(part_count)))
-
-    return result
-
-
-# @capture_timings('load_same_shape_dataframes_from_storage')
-async def load_same_shape_dataframes_from_storage(
-    storage: BlobStorageBase,
-    tenant,
-    obj_paths: List[str],
-    columns=None,
-) -> pd.DataFrame:
-    """
-    IMPORTANT: all dataframe should share the same columns ans types without any overlap on vertical axe. Meaning
-    all can be concat horizontally (concat(dataframes, axis=0) )
-    For now, due to lack of metadata, offset, limit will by applied if and and only if the resulting dataframe have
-    same nb rows than the global index (if none, no slice applied)
-    """
-    # TODO could save the download and load of dataframe if we'd have a way to know the start/end of each chunk
-
-    obj_paths = await _expand_chunk_paths(storage, tenant, obj_paths)
-    dfs = await gather(*[_load_single_dataframe_from_storage(storage, tenant, path, columns) for path in obj_paths])
-
-    # Note when concatenating of rows, order matters
-    df = dfs[0] if len(dfs) == 1 else pd.concat(dfs, axis=0, copy=False)
-    return df
-
-
 # @capture_timings('_read_index')
 async def _read_index(storage: BlobStorageBase, tenant, bulk_catalog: BulkCatalog) -> pd.Index:
     if not bulk_catalog.index_path:
@@ -449,7 +389,7 @@ async def _read_index(storage: BlobStorageBase, tenant, bulk_catalog: BulkCatalo
     index_path = storage_path_builder.join(
         storage_path_builder.record_path_level_0(bulk_catalog.record_id, base_directory=None), bulk_catalog.index_path
     )
-    index_df = await _load_single_dataframe_from_storage(storage, tenant, index_path)
+    index_df = await load_single_dataframe_from_storage(storage, tenant, index_path)
     return index_df.index
 
 
@@ -472,7 +412,7 @@ async def _build_response_from_single_chunk(
         or filters.any_filter()
         or accept_type == MimeTypes.JSON
     ):
-        df = await _load_single_dataframe_from_storage(storage, tenant, blob_path, columns_to_load)
+        df = await load_single_dataframe_from_storage(storage, tenant, blob_path, columns_to_load)
         df = _dataframe_filters_and_reorder_columns(df, filters)
 
         # TODO try load meta only and columns to potentially save full data load and dump operations

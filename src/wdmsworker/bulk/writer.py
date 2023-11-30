@@ -232,12 +232,10 @@ async def complete_session(
 
             if previous_catalog is not None:
                 # let's load the chunk metas
-                previous_chunk_metas = await gather(
-                    *[
-                        _load_or_create_chunk_metadata(storage, tenant, p, reference_curve)
-                        for p in previous_catalog.get_absolut_chunk_paths()
-                    ]
-                )
+                previous_chunk_metas = await gather(*[
+                    _load_or_create_chunk_metadata(storage, tenant, p, reference_curve)
+                    for p in previous_catalog.get_absolut_chunk_paths()
+                ])
             else:
                 get_logger().info("updating from previous without catalog")
                 chunk_path = await get_chunk_path_outside_session(storage, tenant, record_id, previous_bulk)  # type: ignore
