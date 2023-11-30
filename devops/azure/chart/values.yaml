@@ -38,17 +38,17 @@ node_selector_labels:
 
 resources:
  limits:
-   memory: 2Gi
-   cpu: 4
+   memory: 1500Mi
+   cpu: 1
  requests:
    memory: 256Mi
-   cpu: 1
+   cpu: 500m
 
 kedaconfig:
  servicepath: "/api/os-wellbore-ddms" #monitor ddms end points
- duration: "5m"
+ duration: "2m"
  thresholdcoefficient: "0.8"
- threshold: "50"
+ threshold: "800"
  metricType: "Utilization"
  utilization:
     cpu: 70
@@ -59,9 +59,9 @@ probes:
     periodSeconds: 5
   liveness:
     initialDelaySeconds: 15
-    periodSeconds: 5
-    timeoutSeconds: 1
-    failureThreshold: 3
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 10
   readiness:
     initialDelaySeconds: 5
     timeoutSeconds: 5

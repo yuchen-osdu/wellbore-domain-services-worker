@@ -21,18 +21,16 @@ def _add_nan_values_in_df(chunk_df):
 
 
 def _create_multi_types_df(values_count):
-    return pd.DataFrame(
-        {
-            "int-A": np.arange(-100, 400, step=1, dtype=int),
-            "int-A-nan": np.arange(-100, 1400, step=3, dtype=int),
-            "float-B": np.arange(-100, 650, step=1.5, dtype=float),
-            "float-B-nan": np.arange(-100, 1550, step=3.3, dtype=float),
-            "date-C": pd.date_range(start="1/1/2022", freq="s", periods=values_count),
-            "date-C-nan": pd.date_range(start="1/1/2022", freq="D", periods=values_count),
-            "bool-D": [i % 2 == 0 for i in range(values_count)],
-            "string-E": [f"string_value_{i}" for i in range(values_count)],
-        }
-    )
+    return pd.DataFrame({
+        "int-A": np.arange(-100, 400, step=1, dtype=int),
+        "int-A-nan": np.arange(-100, 1400, step=3, dtype=int),
+        "float-B": np.arange(-100, 650, step=1.5, dtype=float),
+        "float-B-nan": np.arange(-100, 1550, step=3.3, dtype=float),
+        "date-C": pd.date_range(start="1/1/2022", freq="s", periods=values_count),
+        "date-C-nan": pd.date_range(start="1/1/2022", freq="D", periods=values_count),
+        "bool-D": [i % 2 == 0 for i in range(values_count)],
+        "string-E": [f"string_value_{i}" for i in range(values_count)],
+    })
 
 
 def test_compute_statistics_batch():

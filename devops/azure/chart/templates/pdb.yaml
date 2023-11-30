@@ -1,0 +1,10 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+   name: os-wellbore-ddms-worker{{ include "os-wellbore-ddms-worker.name-suffix" . }}-pdb
+{{ include "os-wellbore-ddms-worker.namespace" . | indent 3}}
+spec:
+   minAvailable: 1
+   selector:
+    matchLabels:
+      app: os-wellbore-ddms-worker{{ include "os-wellbore-ddms-worker.name-suffix" . }}

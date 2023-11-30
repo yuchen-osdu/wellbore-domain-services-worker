@@ -49,6 +49,24 @@ spec:
                 values:
                 - {{ $.Values.nodepool }}
             {{- end }}
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 1
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - os-wellbore-ddms-worker{{ include "os-wellbore-ddms-worker.name-suffix" . }}
+              topologyKey: topology.kubernetes.io/zone
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: os-wellbore-ddms-worker{{ include "os-wellbore-ddms-worker.name-suffix" . }}
 {{- end }}   
       volumes:
         # Note:

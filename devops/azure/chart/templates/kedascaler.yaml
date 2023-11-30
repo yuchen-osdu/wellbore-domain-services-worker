@@ -57,23 +57,18 @@ spec:
     horizontalPodAutoscalerConfig:
       behavior:
         scaleDown:
-          # Either remove 20% of current pods or 2 pods (whichever is lower) every 30 until the the HPA stabilizes
-          selectPolicy: Min
           policies:
           - type: Pods
-            value: 2
-            periodSeconds: 30
-          - type: Percent
-            value: 20
+            value: 1
             periodSeconds: 30
         scaleUp:
-          # Either add 50% of current pods or 2 pods (whichever is higher) every 10 seconds until the the HPA stabilizes
+          stabilizationWindowSeconds: 0
           selectPolicy: Max
           policies:
           - type: Pods
             value: 2
             periodSeconds: 30
           - type: Percent
-            value: 50
+            value: 20
             periodSeconds: 30
 {{- end }}

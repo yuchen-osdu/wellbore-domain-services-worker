@@ -12,20 +12,81 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Iterable, AsyncIterator, Dict
+from typing import Iterable, AsyncIterator, Dict, List
 from asyncio import wait, create_task, gather, Task, FIRST_COMPLETED
+from io import BytesIO
 
 import pandas as pd
 
 from osdu.core.api.storage.blob_storage_base import BlobStorageBase
 
 from .chunk_meta import ChunkMeta
-from .dataframe import load_parquet, dump_to_parquet
+from .dataframe import dump_to_parquet
 from . import storage_path_builder
 from .errors import BulkUploadError
 from .validators import validate_df
 from ..logger import get_logger
 from ..model.mime_types import MimeTypes
+from ..capture_timings import timeit
+
+
+async def load_single_dataframe_from_storage(storage: BlobStorageBase, tenant, obj_path: str, columns_to_load=None):
+    """download and load a single dataframe selecting columns, and index based by position if offset and/or
+    limit are provided"""
+    # limit the concurrency to not overwhelm the service
+    with timeit("download dataframe from storage"):
+        content = await storage.download(tenant, obj_path)
+    with timeit("loading parquet from dataframe"):
+        content = BytesIO(content)
+        return pd.read_parquet(content, columns=columns_to_load)
+
+
+async def _expand_chunk_paths(
+    storage: BlobStorageBase,
+    tenant,
+    obj_paths: List[str],
+) -> List[str]:
+    """
+    the goal of this deal with dataframe saved by Dask with multi partition. In this case the path is not an actual
+    parquet file but a folder containing multiple parquet files. Unfortunately there's no way to know how many
+    files but listing objects in this folder with a name format `part.X.parquet`.
+    Usually there's a single folder to expand so the following is kept simple.
+    """
+    result = []
+    for p in obj_paths:
+        if ChunkMeta.is_a_chunk_file(p):
+            result.append(p)
+        else:
+            get_logger().debug(f"dask multipart detected for path {p}")
+            list_result = await storage.list_objects(tenant, prefix=storage_path_builder.join(p, "part."))
+            part_count = len([op for op in list_result if op.endswith("parquet")])  # for sure there's a better way
+            # iterate on count to ensure the order for the later concat
+            result.extend((storage_path_builder.join(p, f"part.{i}.parquet") for i in range(part_count)))
+
+    return result
+
+
+# @capture_timings('load_same_shape_dataframes_from_storage')
+async def load_same_shape_dataframes_from_storage(
+    storage: BlobStorageBase,
+    tenant,
+    obj_paths: List[str],
+    columns=None,
+) -> pd.DataFrame:
+    """
+    IMPORTANT: all dataframe should share the same columns ans types without any overlap on vertical axe. Meaning
+    all can be concat horizontally (concat(dataframes, axis=0) )
+    For now, due to lack of metadata, offset, limit will by applied if and and only if the resulting dataframe have
+    same nb rows than the global index (if none, no slice applied)
+    """
+    # TODO could save the download and load of dataframe if we'd have a way to know the start/end of each chunk
+
+    obj_paths = await _expand_chunk_paths(storage, tenant, obj_paths)
+    dfs = await gather(*[load_single_dataframe_from_storage(storage, tenant, path, columns) for path in obj_paths])
+
+    # Note when concatenating of rows, order matters
+    df = dfs[0] if len(dfs) == 1 else pd.concat(dfs, axis=0, copy=False)
+    return df
 
 
 async def chunk_download_generator(
@@ -47,7 +108,9 @@ async def chunk_download_generator(
     done_by_name: Dict[str, Task] = dict()
     path_list = list(object_paths)
 
-    pending_tasks = set(create_task(storage.download(tenant, p), name=p) for p in path_list)
+    pending_tasks = set(
+        create_task(load_same_shape_dataframes_from_storage(storage, tenant, [p]), name=p) for p in path_list
+    )
     try:
         next_waited_task_name = path_list.pop(0) if ensure_order else None
         while pending_tasks:
@@ -68,7 +131,7 @@ async def chunk_download_generator(
                 if any_exception is not None:
                     raise any_exception
 
-                yield load_parquet(task.result())
+                yield task.result()
 
     except Exception:
         # cancel all remaining

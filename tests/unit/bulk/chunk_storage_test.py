@@ -18,29 +18,26 @@ from random import randint
 import pandas as pd
 
 import pytest
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 from wdmsworker.bulk.chunk_storage import chunk_download_generator
 
 
 @pytest.mark.anyio
 async def test_chunk_download_generator():
-    storage = AsyncMock()
-
-    async def download_mock(tenant, object_name: str, *args, **kwargs):
+    async def load_dataframes_mock(_storage, _tenant, obj_paths, *args, **kwargs):
         await sleep(float(randint(100, 999)) / 1000.0)
-        return pd.DataFrame({object_name: [0]}).to_parquet()
-
-    storage.download = download_mock
+        return pd.DataFrame({"|".join(obj_paths): [0]})
 
     ordered_object = [str(i) for i in range(50)]
     ordered_actual = []
     unordered_actual = []
-    async for d in chunk_download_generator(storage, Mock(), ordered_object, ensure_order=True):
-        ordered_actual.extend(d.columns.tolist())
+    with patch("wdmsworker.bulk.chunk_storage.load_same_shape_dataframes_from_storage", load_dataframes_mock):
+        async for d in chunk_download_generator(AsyncMock(), Mock(), ordered_object, ensure_order=True):
+            ordered_actual.extend(d.columns.tolist())
 
-    async for d in chunk_download_generator(storage, Mock(), ordered_object, ensure_order=False):
-        unordered_actual.extend(d.columns.tolist())
+        async for d in chunk_download_generator(AsyncMock(), Mock(), ordered_object, ensure_order=False):
+            unordered_actual.extend(d.columns.tolist())
 
     assert ordered_actual == ordered_object
     assert unordered_actual != ordered_object  # order is very unlikely
@@ -49,19 +46,21 @@ async def test_chunk_download_generator():
 
 @pytest.mark.anyio
 async def test_chunk_download_generator_raise_exception():
-    storage = AsyncMock()
-
-    async def download_mock(tenant, object_name: str, *args, **kwargs):
-        if int(object_name) > 25:
+    async def load_dataframes_mock(_storage, _tenant, obj_paths, *args, **kwargs):
+        await sleep(float(randint(100, 999)) / 1000.0)
+        if int(obj_paths[0]) == 25:
             raise ValueError("fake exception")
-        return pd.DataFrame({object_name: [0]}).to_parquet()
+        return pd.DataFrame({obj_paths[0]: [0]}).to_parquet()
 
-    storage.download = download_mock
+    with patch("wdmsworker.bulk.chunk_storage.load_same_shape_dataframes_from_storage", load_dataframes_mock):
+        with pytest.raises(ValueError, match="fake exception"):
+            async for _ in chunk_download_generator(
+                AsyncMock(), Mock(), [str(i) for i in range(50)], ensure_order=True
+            ):
+                pass
 
-    with pytest.raises(ValueError, match="fake exception"):
-        async for _ in chunk_download_generator(storage, Mock(), [str(i) for i in range(50)], ensure_order=True):
-            pass
-
-    with pytest.raises(ValueError, match="fake exception"):
-        async for _ in chunk_download_generator(storage, Mock(), [str(i) for i in range(50)], ensure_order=False):
-            pass
+        with pytest.raises(ValueError, match="fake exception"):
+            async for _ in chunk_download_generator(
+                AsyncMock(), Mock(), [str(i) for i in range(50)], ensure_order=False
+            ):
+                pass
