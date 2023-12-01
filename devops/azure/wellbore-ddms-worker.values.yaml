@@ -1,0 +1,67 @@
+#  Copyright © Microsoft Corporation
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+
+# referred https://community.opengroup.org/osdu/platform/deployment-and-operations/helm-charts-azure/-/blob/master/osdu-ddms/standard-ddms/wellbore.osdu.values.yaml  
+# updated the values accordingly
+
+azure:
+  keyvault:
+    secrets:
+    - key: appinsight.key
+      obj: appinsights-key
+deployment:
+  replicaCount: 1
+
+# disabling as Glab is going to use the Virtual service with Istio-Gateway
+# ingress:
+#   appGateway:
+#     issuer: letsencrypt-prod-dns
+#     enableKeyvaultCert: false
+
+configuration:
+  - service: wellbore-ddms-worker
+    container:
+      image: wellbore-domain-services-worker
+      containerPort: 8080
+    path: /api/wdms-worker
+    podAnnotations:
+      prometheus.io/path: /api/wdms-worker/metrics
+      prometheus.io/port: "8080"
+      prometheus.io/scrape: "true"
+    probe:
+      readiness:
+        path: /api/wdms-worker/readiness
+      liveness:
+        path: /api/wdms-worker/healthz
+    auth:
+      disable:
+        - "/api/wdms-worker/"
+        - "/api/wdms-worker/healthz"
+        - "/api/wdms-worker/readiness"
+    config:
+      CLOUD_PROVIDER: "az"
+      SERVICE_NAME: "wellbore-ddms-worker"
+      OPENAPI_PREFIX: "/api/wdms-worker"
+      ENVIRONMENT_NAME: "glab"
+      SERVICE_HOST_PARTITION: "http://partition.osdu/api/partition"
+      KEYVAULT_URL: "https://{{ .Values.azure.keyvault.name }}.vault.azure.net/"
+      USE_PARTITION_SERVICE: "enabled"
+    networkPolicy:
+     allowAccessFrom:
+     - name: wellbore-ddms
+
+    # FIXME: Specific to OSDU deployment
+    secrets:
+      - name: AZ_AI_INSTRUMENTATION_KEY
+        key: appinsight.key
