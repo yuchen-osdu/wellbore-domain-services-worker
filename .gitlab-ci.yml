@@ -10,6 +10,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+variables:
+  AZURE_TEST_TYPE: "python"
+  AZURE_SERVICE: "wellbore-domain-services-worker"
+  AZURE_DEPLOYMENTS_SUBDIR: devops/azure
+  AZURE_CLIENT_ID: $AZURE_PRINCIPAL_ID
+  AZURE_CLIENT_SECRET: $AZURE_PRINCIPAL_SECRET
+  AZURE_DATA_PARTITION: opendes
+  AZURE_AD_APP_RESOURCE_ID: $AZURE_APP_ID
+  KEYVAULT_URI: $KEYVAULT_URI
+  AZURE_APP_CLIENT_SECRET: $AZURE_APP_CLIENT_SECRET
+  STORAGE_ACCOUNT_NAME: $STORAGE_ACCOUNT_NAME
+  AZURE_SKIP_TEST: "true"
+
+include:
+  - project: "osdu/platform/ci-cd-pipelines"
+    file: "standard-setup.yml"
+  - project: "osdu/platform/ci-cd-pipelines"
+    file: "cloud-providers/azure.yml"
+  - local: "/devops/azure/override-stages.yml"
+
 default:
   image: python:3.10-slim-bullseye
   before_script:
@@ -20,6 +40,17 @@ default:
 stages:
   - linting
   - testing
+  - review
+  - build
+  - coverage
+  - containerize
+  - scan
+  - deploy
+  - bootstrap
+  - integration
+  - performance-testing
+  - publish
+  - deploy_preship
 
 linters-check:
   tags: ["osdu-small"]
@@ -62,3 +93,7 @@ service-tests:
         coverage_format: cobertura
         path: coverage.xml
 
+trigger-trusted-tests:
+  image: $CI_REGISTRY/osdu/platform/trusted-mr-container
+  before_script:
+    - echo "overriding before script"
