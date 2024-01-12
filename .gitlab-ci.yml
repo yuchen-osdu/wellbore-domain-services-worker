@@ -61,7 +61,7 @@ linters-check:
     - mypy ./src
 
 unit-tests:
-  tags: ["osdu-small"]
+  tags: ["osdu-medium"]
   stage: testing
   script:
     - coverage run -m pytest ./tests/unit --junitxml=report.xml
