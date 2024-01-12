@@ -11,9 +11,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import itertools
 from io import BytesIO
 import uuid
+from enum import Enum
 
 import pandas as pd
 from natsort import natsorted
@@ -30,7 +31,12 @@ from pandas.testing import assert_frame_equal
 from wdmsworker.bulk.chunk_meta import ChunkMeta
 from wdmsworker.bulk.dataframe import filter_by_index
 from wdmsworker.model.filtering_model import BulkValueFilter
-from ..generate_data import generate_df, generate_df_dtype, assert_dataframe_from_content
+from ..generate_data import (
+    generate_df,
+    generate_df_dtype,
+    assert_dataframe_from_content,
+    generate_chunk_filename_dask_impl,
+)
 
 from wdmsworker.bulk.filtering import BulkValueFilterOperator, ValueFilters
 from wdmsworker.bulk import storage_path_builder
@@ -64,6 +70,12 @@ describe_params = [
     pytest.param(False, id="read_data"),
     pytest.param(True, id="describe"),
 ]
+
+
+class IndexType(str, Enum):
+    Int = "index_int"
+    Float = "index_float"
+    StartNaN = "index_start_nan"  # very specific case, first index value is a NaN
 
 
 def assert_describe_from_content(expected_df, response):
@@ -222,6 +234,12 @@ def test_generate_chunk_filename(data_type_name):
         df = df.set_index(neg_col)
         chunk_name = ChunkMeta.generate_filename(df) + ".parquet"
         assert ChunkMeta.is_a_chunk_file(chunk_name)
+
+
+def test_is_chunk_file_from_dask_including_nan():
+    for a, b in itertools.product([1, 42.6, "nan"], [50, 75.9, "nan"]):
+        chunk_name = f"{a}_{b}_1656070025919.d467647626e7f36390edb7b54cbf99f397302911.parquet"
+        assert ChunkMeta.is_a_chunk_file(chunk_name), chunk_name
 
 
 @pytest.mark.anyio
@@ -463,11 +481,22 @@ async def test_single_chunk_case_many_columns(
 @pytest.mark.parametrize(
     "chunk_method", ["no_split", "horizontal_and_vertical_split", "horizontal_split", "vertical_split"]
 )
+@pytest.mark.parametrize("dask_chunk_name_generator", [False, True], ids=["chunk_name_worker", "chunk_name_legacy"])
+@pytest.mark.parametrize("index_type", IndexType)
 async def test_read_bulk(
-    chunk_method, bulk_storage_mock: BlobStorageBase, test_tenant, describe, accept_type, orient: JSONOrient
+    chunk_method,
+    bulk_storage_mock: BlobStorageBase,
+    test_tenant,
+    describe,
+    accept_type,
+    orient: JSONOrient,
+    dask_chunk_name_generator: bool,
+    index_type: IndexType,
 ):
-    reference_df, chunk_groups = split_bulk_into_chunk(chunk_method)
-    catalog = await store_chunks(bulk_storage_mock, test_tenant, chunk_groups)
+    reference_df, chunk_groups = split_bulk_into_chunk(chunk_method, index_type=index_type)
+    catalog = await store_chunks(
+        bulk_storage_mock, test_tenant, chunk_groups, use_dask_chunk_name_generator=dask_chunk_name_generator
+    )
     catalog.nb_rows = len(reference_df.index)
     common_kwargs = {
         "storage": bulk_storage_mock,
@@ -825,8 +854,15 @@ def fake_chunk_name(suffix):
     return "000000000000.000000000000." + suffix
 
 
-def split_bulk_into_chunk(method: str):
-    reference_df = generate_df(["A", "B", "C", "D", "E", "F[0]", "F[1]"], index=range(50))
+def split_bulk_into_chunk(method: str, index_type: IndexType = IndexType.Int):
+    if index_type == IndexType.Int:
+        index = range(50)
+    else:
+        index = [i + 0.1 for i in range(50)]
+        if index_type == IndexType.StartNaN:
+            index[0] = None
+
+    reference_df = generate_df(["A", "B", "C", "D", "E", "F[0]", "F[1]"], index=index)
     if method == "horizontal_and_vertical_split":
         return reference_df, [  # first level split by curve A, B, C
             [
@@ -881,6 +917,7 @@ async def store_chunks(
     record_id="r_id",
     session_id="s_id",
     bulk_id="b_id",
+    use_dask_chunk_name_generator=False,
 ) -> BulkCatalog:
     """ """
     catalog = BulkCatalog(record_id, origin=BulkCatalogOrigin.from_file())
@@ -894,7 +931,11 @@ async def store_chunks(
         chunk_paths = []
         columns = set()
         for df in chunks:
-            chunk_relative_path = join(relative_base_path, ChunkMeta.generate_filename(df) + ".parquet")
+            if use_dask_chunk_name_generator:
+                chunk_name = generate_chunk_filename_dask_impl(df)
+            else:
+                chunk_name = ChunkMeta.generate_filename(df)
+            chunk_relative_path = join(relative_base_path, chunk_name + ".parquet")
             chunk_full_path = join(level_0_path, chunk_relative_path)
             await storage.upload(tenant, chunk_full_path, df.to_parquet(None, index=True))
             chunk_paths.append(chunk_relative_path)
@@ -1032,7 +1073,7 @@ async def assert_read_multicases(assert_read_fn, reference_df, **common_kwargs):
     # select columns, filter values and index
     await assert_read_fn(
         **common_kwargs,
-        expected_df=expected_filtered_df[requested_cols][2:5],
+        expected_df=expected_filtered_df[requested_cols].iloc[2:5],
         columns=["B", "D", "C"],
         filters_params=ValueFilters(bulk_filters),
         offset=2,
@@ -1042,7 +1083,7 @@ async def assert_read_multicases(assert_read_fn, reference_df, **common_kwargs):
     # no columns selected, filter values and index
     await assert_read_fn(
         **common_kwargs,
-        expected_df=expected_filtered_df[2:5],
+        expected_df=expected_filtered_df.iloc[2:5],
         filters_params=ValueFilters(bulk_filters),
         offset=2,
         limit=3,

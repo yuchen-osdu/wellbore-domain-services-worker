@@ -122,6 +122,15 @@ conflicting_cases = [
         ],
         [],
     ],
+    [  # Verify TooManyValues is not raised
+        [
+            (["A"], 0, 5),
+        ],
+        [
+            (["A"], 5, 10_000_005),
+        ],
+        [],
+    ],
 ]
 
 
@@ -159,10 +168,12 @@ async def test_resolve(
         bulk_storage_mock, test_tenant, "record_id", "session_id", current_metas, previous_metas
     )
 
-    content = await bulk_storage_mock.download(
-        test_tenant, resolved_chunk_meta[0].get_filepath(ChunkMeta.FileType.CHUNK)
-    )
-    actual_df = pd.read_parquet(BytesIO(content))
+    pds = []
+    for chunk_meta in resolved_chunk_meta:
+        content = await bulk_storage_mock.download(test_tenant, chunk_meta.get_filepath(ChunkMeta.FileType.CHUNK))
+        pds.append(pd.read_parquet(BytesIO(content)))
+
+    actual_df = pd.concat(pds)
 
     print(expected_df)
     print(actual_df)

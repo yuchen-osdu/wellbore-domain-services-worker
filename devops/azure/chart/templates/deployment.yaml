@@ -139,14 +139,5 @@ spec:
             readOnly: true
         resources:
           {{ toYaml .Values.resources | nindent 10 }}
-        livenessProbe:
-          httpGet:
-            path: {{ include "os-wellbore-ddms-worker.prefix" . }}/healthz
-            port: 8080
-          {{ toYaml .Values.probes.liveness | nindent 10 }}
-        readinessProbe:
-          httpGet:
-            path: {{ include "os-wellbore-ddms-worker.prefix" . }}/readiness
-            port: 8080
-          {{ toYaml .Values.probes.readiness | nindent 10 }}
+
       terminationGracePeriodSeconds: 45

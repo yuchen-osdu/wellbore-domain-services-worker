@@ -24,7 +24,7 @@ from .errors import BulkValidationError
 from .storage_path_builder import basename, hash_for_filename, split_path, join, relpath
 from ..model.mime_types import MimeTypes
 
-index_reg = r"[+-]?\d+(\.\d*)?"  # it can be an integer or a float
+index_reg = r"(([+-]?\d+(\.\d*)?)|(nan))"  # it can be an integer or a float or nan
 CHUNK_FILENAME_REGEX = compile(rf"^{index_reg}_{index_reg}_\d+(\.).+$")
 CHUNK_FILENAME_REGEX_V2 = compile(r"^(\w){12}(\.)(\w){12}(\.).+$")
 

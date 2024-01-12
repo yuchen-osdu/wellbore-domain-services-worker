@@ -36,7 +36,12 @@ from wdmsworker.bulk.writer import write_bulk, write_bulk_data_in_session, compl
 from wdmsworker.bulk.read_router import get_bulk_route
 from wdmsworker.bulk.dataframe import load_df
 
-from ..generate_data import generate_df, assert_frame_equal, assert_dataframe_from_content
+from ..generate_data import (
+    generate_df,
+    assert_frame_equal,
+    assert_dataframe_from_content,
+    generate_chunk_filename_dask_impl,
+)
 
 format_params = [
     pytest.param(MimeTypes.PARQUET, id="parquet"),
@@ -739,19 +744,6 @@ async def read_all_and_validate(
 ):
     actual_df = await read_all(storage, tenant, record_id, bulk_id)
     assert_frame_equal(actual_df, expected_df)
-
-
-def generate_chunk_filename_dask_impl(dataframe: pd.DataFrame) -> str:
-    import time
-
-    first_idx, last_idx = dataframe.index[0], dataframe.index[-1]
-    if isinstance(dataframe.index, pd.DatetimeIndex):
-        first_idx, last_idx = dataframe.index[0].value, dataframe.index[-1].value
-
-    shape_str = "_".join(f"{cn}:{dt}" for cn, dt in dataframe.dtypes.items())
-    shape = hashlib.sha1(shape_str.encode()).hexdigest()
-    cur_time = round(time.time() * 1000)
-    return f"{first_idx}_{last_idx}_{cur_time}.{shape}"
 
 
 async def simulate_dask_commit(

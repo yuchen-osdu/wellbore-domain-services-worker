@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from io import BytesIO
+import hashlib
 
 import numpy as np
 
@@ -84,3 +85,16 @@ def assert_dataframe_from_content(expected_df, content, accept_type, orient="spl
             pd.testing.assert_frame_equal(
                 expected_df, actual_df[expected_df.columns], check_dtype=accept_type == MimeTypes.PARQUET
             )
+
+
+def generate_chunk_filename_dask_impl(dataframe: pd.DataFrame) -> str:
+    import time
+
+    first_idx, last_idx = dataframe.index[0], dataframe.index[-1]
+    if isinstance(dataframe.index, pd.DatetimeIndex):
+        first_idx, last_idx = dataframe.index[0].value, dataframe.index[-1].value
+
+    shape_str = "_".join(f"{cn}:{dt}" for cn, dt in dataframe.dtypes.items())
+    shape = hashlib.sha1(shape_str.encode()).hexdigest()
+    cur_time = round(time.time() * 1000)
+    return f"{first_idx}_{last_idx}_{cur_time}.{shape}"
