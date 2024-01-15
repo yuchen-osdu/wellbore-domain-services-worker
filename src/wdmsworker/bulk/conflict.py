@@ -27,7 +27,7 @@ from .chunk_meta import ChunkMeta
 from .dataframe import split_into_chunks
 from .constants import WRITE_MAX_COLUMNS_COUNT, WRITE_MAX_TOTAL_VALUES_COUNT
 from .errors import BulkValidationError
-from .validators import validate_df
+from .validators import validate_column_index_reference
 from ..capture_timings import capture_timings
 from ..logger import get_logger
 
@@ -125,7 +125,7 @@ async def resolve_single_conflict_group(
 
     # TODO must keep NaN values from current data, current should always overwrite
     final_df = merged_current.combine_first(previous_df)
-    validate_df(final_df, reference_curve)
+    validate_column_index_reference(final_df, reference_curve)
 
     chunks = split_into_chunks(
         final_df, max_values_per_chunk=WRITE_MAX_TOTAL_VALUES_COUNT, max_columns_per_chunk=WRITE_MAX_COLUMNS_COUNT

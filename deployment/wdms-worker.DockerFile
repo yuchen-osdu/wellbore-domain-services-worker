@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM python:3.11-slim-bullseye
+FROM python:3.11-slim-bookworm
 
 COPY pyproject.toml ./
 COPY README.md ./
@@ -28,6 +28,9 @@ WORKDIR ./
 
 # Make the container run as non-root user
 RUN addgroup --system appuser && adduser --system appuser && adduser appuser appuser
+
+# Prevent CVE-2023-31484 by removing perl-base. To be removed, as soon as this CVE is fixed in official images
+RUN apt-get purge perl-base -y --allow-remove-essential
 
 USER appuser
 

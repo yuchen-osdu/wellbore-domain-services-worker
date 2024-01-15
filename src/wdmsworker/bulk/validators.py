@@ -115,6 +115,28 @@ def validate_reference(df: pd.DataFrame, reference_curve: str | None) -> Validat
     return ValidationSuccess
 
 
+def validate_column_index_reference(df: pd.DataFrame, reference_curve: str | None):
+    """
+    Validate dataframe:
+        - columns must not contain reserved names
+        - index must be unique, numerical or date time types
+        - if reference's curve in `df`, must not contain NaN, be unique and monotonic
+    raise in case of invalid
+    :param df: dataframe to validate
+    :param reference_curve:
+    :return: None
+    :raise: BulkValidationError
+    """
+    errors = [
+        v.errors
+        for v in (columns_not_in_reserved_names(df), validate_index(df), validate_reference(df, reference_curve))
+        if not v.ok and v.errors
+    ]
+
+    if errors:
+        raise exc.BulkValidationError(", ".join(errors))
+
+
 def validate_df(df: pd.DataFrame, reference_curve: str | None):
     """
     validate dataframe:
@@ -135,11 +157,4 @@ def validate_df(df: pd.DataFrame, reference_curve: str | None):
     if row_count * column_count > WRITE_MAX_TOTAL_VALUES_COUNT:
         raise exc.TooManyValuesError(row_count * column_count, WRITE_MAX_TOTAL_VALUES_COUNT)
 
-    errors = [
-        v.errors
-        for v in (columns_not_in_reserved_names(df), validate_index(df), validate_reference(df, reference_curve))
-        if not v.ok and v.errors
-    ]
-
-    if errors:
-        raise exc.BulkValidationError(", ".join(errors))
+    validate_column_index_reference(df, reference_curve)
