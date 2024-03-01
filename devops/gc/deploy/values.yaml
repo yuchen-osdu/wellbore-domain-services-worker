@@ -1,0 +1,22 @@
+global:
+  domain: ""
+  onPremEnabled: false
+  limitsEnabled: true
+
+data:
+  # Configmaps
+  cloudProvider: "gc"
+  openapiPrefix: "/api/wdms-worker"
+  # Deployments
+  requestsCpu: "5m"
+  requestsMemory: "350Mi"
+  limitsCpu: "1"
+  limitsMemory: "1G"
+  image: ""
+  imagePullPolicy: "IfNotPresent"
+  serviceAccountName: "wellbore-worker"
+
+conf:
+  configmap: "wellbore-worker-config"
+  appName: "wellbore-worker"
+  replicas: 1

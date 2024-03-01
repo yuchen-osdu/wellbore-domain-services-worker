@@ -1,0 +1,72 @@
+variables:
+  GC_SERVICE: wellbore-worker
+  GC_INT_TEST_TYPE: python
+
+gc-containerize-bootstrap-gitlab:
+  needs: []
+
+gc-containerize-bootstrap-gcr:
+  needs: []
+
+gc-containerize-gitlab:
+  needs: []
+  variables:
+    BUILD_PATH: "./devops/gc/Dockerfile"
+  before_script:
+    - echo "Building a new Docker image..."
+
+gc-containerize-gcr:
+  needs: []
+  variables:
+    BUILD_PATH: "./devops/gc/Dockerfile"
+
+# COMMUNITY
+gc-deploy:
+  before_script:
+    - echo "Deploying a new App version..."
+
+gc-osdutest:
+  rules:
+    - exists:
+        - never/existing/file.txt
+
+gc-test-python:
+  rules:
+    - exists:
+        - never/existing/file.txt
+
+# BM
+gc-baremetal-deploy:
+  rules:
+    - exists:
+        - never/existing/file.txt
+
+gc-baremetal-osdutest:
+  rules:
+    - exists:
+        - never/existing/file.txt
+
+gc-baremetal-test-python:
+  rules:
+    - exists:
+        - never/existing/file.txt
+
+# DEV2
+gc-dev2-deploy:
+  before_script:
+    - echo "Deploying a new App version..."
+
+gc-dev2-test-python:
+  rules:
+    - exists:
+        - never/existing/file.txt
+
+gc-dev2-osdutest:
+  rules:
+    - exists:
+        - never/existing/file.txt
+
+# PRESHIP
+gc-preship-deploy:
+  before_script:
+    - echo "Deploying a new App version..."

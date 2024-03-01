@@ -26,9 +26,14 @@ variables:
 include:
   - project: "osdu/platform/ci-cd-pipelines"
     file: "standard-setup.yml"
+
   - project: "osdu/platform/ci-cd-pipelines"
     file: "cloud-providers/azure.yml"
   - local: "/devops/azure/override-stages.yml"
+
+  - project: "osdu/platform/ci-cd-pipelines"
+    file: "cloud-providers/gc-global.yml"
+  - local: "devops/gc/pipeline/override-stages.yml"
 
 default:
   image: python:3.10-slim-bullseye
@@ -75,7 +80,6 @@ unit-tests:
       coverage_report:
         coverage_format: cobertura
         path: coverage.xml
-
 
 service-tests:
   tags: ["osdu-medium"]
