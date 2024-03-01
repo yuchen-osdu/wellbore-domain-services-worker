@@ -81,7 +81,7 @@ ibm = [
 ]
 
 gc = [
-    # TODO: add dependencies specific to gc
+    "osdu-core-lib-python-gcp==2.1.3",
 ]
 
 anthos = [
