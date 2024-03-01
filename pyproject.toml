@@ -84,8 +84,13 @@ gc = [
     "osdu-core-lib-python-gcp==2.1.3",
 ]
 
-anthos = [
-    # TODO: add dependencies specific to anthos
+baremetal = [
+    "aiohttp>=3.9.1",
+    "boto3",
+    "botocore",
+    "requests",
+    "osdu-api~=0.21.0rc",
+    "osdu-core-lib-python-baremetal==2.0.0"
 ]
 
 [tool.pytest.ini_options]

@@ -39,7 +39,6 @@ Detailed information about these variables is provided below.
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|----------|
-| **data.cloudProvider** | Cloud Provider | string | `gc` | yes |
 | **data.openapiPrefix** | OpenAPI prefix | string | `/api/wdms-worker` | yes |
 
 ### Deployment Variables
@@ -50,7 +49,8 @@ Detailed information about these variables is provided below.
 | **data.requestsMemory** | amount of requested memory| string | `350Mi` | yes |
 | **data.limitsCpu** | CPU limit | string | `1` | only if `global.limitsEnabled` is true |
 | **data.limitsMemory** | memory limit | string | `1G` | only if `global.limitsEnabled` is true |
-| **data.image** | Service image | string | - | yes |
+| **data.gcImage** | Service image for GC env | string | `community.opengroup.org:5555/osdu/platform/domain-data-mgmt-services/wellbore/wellbore-domain-services-worker/gc-wellbore-worker-master:latest` | yes |
+| **data.bmImage** | Service image for BM env | string | `community.opengroup.org:5555/osdu/platform/domain-data-mgmt-services/wellbore/wellbore-domain-services-worker/bm-wellbore-worker-master:latest` | yes |
 | **data.imagePullPolicy** | when to pull image | string | `IfNotPresent` | yes |
 | **data.serviceAccountName** | k8s service account name for the application | string | `wellbore-worker` | yes |
 
@@ -60,6 +60,7 @@ Detailed information about these variables is provided below.
 |------|-------------|------|---------|---------|
 | **conf.appName** | Service name | string | `wellbore-worker` | yes |
 | **conf.configmap** | configmap to be used | string | `wellbore-worker-config` | yes |
+| **conf.minioSecretName** | MinIO secret name | string | `wellbore-minio-secret` | yes |
 | **conf.replicas** | Number of replicas for the application k8s deployment | digit | `1` | yes |
 
 ### Installing the Helm Chart

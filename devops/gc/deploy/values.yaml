@@ -5,18 +5,19 @@ global:
 
 data:
   # Configmaps
-  cloudProvider: "gc"
   openapiPrefix: "/api/wdms-worker"
   # Deployments
   requestsCpu: "5m"
   requestsMemory: "350Mi"
   limitsCpu: "1"
   limitsMemory: "1G"
-  image: ""
+  gcImage: "community.opengroup.org:5555/osdu/platform/domain-data-mgmt-services/wellbore/wellbore-domain-services-worker/gc-wellbore-worker-master:latest"
+  bmImage: "community.opengroup.org:5555/osdu/platform/domain-data-mgmt-services/wellbore/wellbore-domain-services-worker/bm-wellbore-worker-master:latest"
   imagePullPolicy: "IfNotPresent"
   serviceAccountName: "wellbore-worker"
 
 conf:
   configmap: "wellbore-worker-config"
   appName: "wellbore-worker"
+  minioSecretName: "wellbore-minio-secret"
   replicas: 1

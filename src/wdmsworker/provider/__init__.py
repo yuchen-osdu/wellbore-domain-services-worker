@@ -27,10 +27,10 @@ def initialize_for_provider(provider: str, app: FastAPI) -> ModuleType:
         from . import gc
 
         provider_module = gc  # type: ignore
-    elif provider == "anthos":
-        from . import anthos
+    elif provider == "baremetal":
+        from . import baremetal
 
-        provider_module = anthos  # type: ignore
+        provider_module = baremetal  # type: ignore
     elif provider == "local":
         from . import local
 
