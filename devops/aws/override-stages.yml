@@ -1,0 +1,75 @@
+variables:
+  #aws variables
+  AWS_BUILD_SUBDIR: provider/os-wellbore-ddms-worker-aws/build-aws
+  AWS_CHART_SUBDIR: devops/aws/chart
+  AWS_SERVICE_GATEWAY: osdu-services/osdu-gateway
+  AWS_ENVIRONMENT: dev
+  AWS_DEPLOY_TARGET: TF
+  AWS_DOCKERFILE_PATH: provider/os-wellbore-ddms-worker-aws/build-aws
+  AWS_SKIP_TESTS: "true"
+  WELLBORE_WORKER_SERVICE_NAME: wellbore-ddms-worker
+wellbore_worker_aws_containerize:
+  # extends: .aws-containerize
+  extends:
+    - .aws
+    - .aws_variables
+    - .aws_common_variables
+  stage: containerize
+  variables:
+    SHA_IMAGE: ${WELLBORE_WORKER_SERVICE_NAME}:${CI_COMMIT_SHA}
+    LATEST_IMAGE: ${WELLBORE_WORKER_SERVICE_NAME}:latest
+    AWS_EKS_DEPLOYMENT_NAME: os-wellbore-ddms-worker
+    AWS_IMAGE_TAG_BASE: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_ECR_REGION}.amazonaws.com/os-wellbore-ddms-worker 
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker build -f $AWS_DOCKERFILE_PATH/Dockerfile -t $CI_REGISTRY_IMAGE/$SHA_IMAGE .
+    - docker push ${CI_REGISTRY_IMAGE}/$SHA_IMAGE
+    - echo $CI_COMMIT_TAG
+
+    # Push to Amazon's container registry
+    - $(aws ecr get-login --no-include-email --region $AWS_ECR_REGION)
+    - docker tag $CI_REGISTRY_IMAGE/$SHA_IMAGE $AWS_IMAGE_TAG_BASE:$CI_COMMIT_SHA
+    - docker tag $CI_REGISTRY_IMAGE/$SHA_IMAGE $AWS_IMAGE_TAG_BASE:latest
+    - docker push $AWS_IMAGE_TAG_BASE:$CI_COMMIT_SHA
+    - docker push $AWS_IMAGE_TAG_BASE:latest
+  only:
+    variables:
+      - $AWS == '1'
+    refs:
+      - branches
+      - merge_requests
+      - tags
+
+wellbore_worker-update-tf:
+  extends:
+    - .aws
+    - .aws_variables
+    - .aws_common_variables
+  stage: deploy
+  allow_failure: false
+  # extends:
+  #   - .aws-update-tf
+  variables:
+    AWS_EKS_DEPLOYMENT_NAME: os-wellbore-ddms-worker
+    AWS_SERVICE_NAMESPACE_SUFFIX: wellbore-ddms-worker
+    AWS_IMAGE_TAG_BASE: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_ECR_REGION}.amazonaws.com/os-wellbore-ddms-worker 
+  needs: ['wellbore_worker_aws_containerize']
+  script:
+    - echo $AWS_REGION $EKS_CLUSTER_NAME $EKS_CLUSTER_MGMT_ROLE $AWS_SERVICE_NAMESPACE $AWS_SERVICE_NAMESPACE_SUFFIX $AWS_EKS_DEPLOYMENT_NAME $AWS_IMAGE_TAG_BASE
+    - export KUBECONFIG=/tmp/kubeconfig-${RANDOM}.yaml
+    - aws eks update-kubeconfig --region $AWS_REGION --name $EKS_CLUSTER_NAME --role-arn $EKS_CLUSTER_MGMT_ROLE
+
+    - chmod 600 $KUBECONFIG
+    - export CONTAINER_IMAGE=`kubectl -n ${AWS_SERVICE_NAMESPACE}-${AWS_SERVICE_NAMESPACE_SUFFIX} get deployment/${AWS_EKS_DEPLOYMENT_NAME} -o jsonpath='{.spec.template.spec.containers[0].name}'`
+
+    - kubectl -n ${AWS_SERVICE_NAMESPACE}-${AWS_SERVICE_NAMESPACE_SUFFIX} set image deployment/${AWS_EKS_DEPLOYMENT_NAME} $CONTAINER_IMAGE=$AWS_IMAGE_TAG_BASE:$CI_COMMIT_SHA
+    - kubectl -n ${AWS_SERVICE_NAMESPACE}-${AWS_SERVICE_NAMESPACE_SUFFIX} rollout restart deployment/${AWS_EKS_DEPLOYMENT_NAME}
+    - kubectl -n ${AWS_SERVICE_NAMESPACE}-${AWS_SERVICE_NAMESPACE_SUFFIX} rollout status -w deployment/${AWS_EKS_DEPLOYMENT_NAME} --timeout=300s
+  only:
+    variables:
+      - $AWS_SKIP_DEPLOY != 'true' && $AWS == '1' && $AWS_DEPLOY_TARGET == 'TF'
+    refs:
+      - branches
+      - merge_requests
+      - tags
