@@ -13,6 +13,7 @@ wellbore_worker_aws_tests:
   stage: compile-and-unit-test
   script:
     - echo "overriding before script"
+
 wellbore_worker_aws_containerize:
   # extends: .aws-containerize
   extends:
