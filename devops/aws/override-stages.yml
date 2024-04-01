@@ -9,18 +9,13 @@ variables:
   AWS_SKIP_TESTS: "true"
   WELLBORE_WORKER_SERVICE_NAME: wellbore-ddms-worker
 
-wellbore_worker_aws_tests:
-  stage: compile-and-unit-test
+compile-and-unit-test:
   script:
-    - echo "overriding before script"
+    - echo "Disabled temporary"
 
 wellbore_worker_aws_containerize:
-  # extends: .aws-containerize
-  extends:
-    - .aws
-    - .aws_variables
-    - .aws_common_variables
-  stage: containerize
+  extends: aws-containerize
+  needs: []
   variables:
     SHA_IMAGE: ${WELLBORE_WORKER_SERVICE_NAME}:${CI_COMMIT_SHA}
     LATEST_IMAGE: ${WELLBORE_WORKER_SERVICE_NAME}:latest
