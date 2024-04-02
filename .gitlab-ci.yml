@@ -23,6 +23,12 @@ variables:
   STORAGE_ACCOUNT_NAME: $STORAGE_ACCOUNT_NAME
   AZURE_SKIP_TEST: "true"
 
+  AWS_BUILD_SUBDIR: provider/os-wellbore-ddms-worker-aws/build-aws
+  AWS_EKS_DEPLOYMENT_NAME: os-wellbore-ddms-worker
+  AWS_SERVICE_NAMESPACE_SUFFIX: wellbore-ddms
+  AWS_SERVICE: wellbore-ddms-worker
+  AWS_DEPLOY_TARGET: TF
+
 include:
   - project: "osdu/platform/ci-cd-pipelines"
     file: "standard-setup.yml"
@@ -37,7 +43,9 @@ include:
 
   - project: "osdu/platform/ci-cd-pipelines"
     file: "cloud-providers/aws-global.yml"
-  - local: "/devops/aws/override-stages.yml"
+
+aws-containerize:
+  needs: []
 
 default:
   image: python:3.10-slim-bullseye
