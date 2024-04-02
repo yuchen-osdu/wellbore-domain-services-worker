@@ -35,6 +35,10 @@ include:
     file: "cloud-providers/gc-global.yml"
   - local: "devops/gc/pipeline/override-stages.yml"
 
+  - project: "osdu/platform/ci-cd-pipelines"
+    file: "cloud-providers/aws-global.yml"
+  - local: "/devops/aws/override-stages.yml"
+
 default:
   image: python:3.10-slim-bullseye
   before_script:
