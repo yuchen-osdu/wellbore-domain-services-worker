@@ -9,12 +9,8 @@ variables:
   AWS_SKIP_TESTS: "true"
   WELLBORE_WORKER_SERVICE_NAME: wellbore-ddms-worker
 
-compile-and-unit-test:
-  script:
-    - echo "Disabled temporary"
 
-wellbore_worker_aws_containerize:
-  extends: aws-containerize
+aws-containerize:
   needs: []
   variables:
     SHA_IMAGE: ${WELLBORE_WORKER_SERVICE_NAME}:${CI_COMMIT_SHA}
@@ -42,20 +38,18 @@ wellbore_worker_aws_containerize:
       - merge_requests
       - tags
 
-wellbore_worker-update-tf:
+aws-update-tf:
   extends:
     - .aws
     - .aws_variables
     - .aws_common_variables
   stage: deploy
   allow_failure: false
-  # extends:
-  #   - .aws-update-tf
   variables:
     AWS_EKS_DEPLOYMENT_NAME: os-wellbore-ddms-worker
-    AWS_SERVICE_NAMESPACE_SUFFIX: wellbore-ddms-worker
+    AWS_SERVICE_NAMESPACE_SUFFIX: wellbore-ddms
     AWS_IMAGE_TAG_BASE: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_ECR_REGION}.amazonaws.com/os-wellbore-ddms-worker 
-  needs: ['wellbore_worker_aws_containerize']
+  needs: ['aws-containerize']
   script:
     - echo $AWS_REGION $EKS_CLUSTER_NAME $EKS_CLUSTER_MGMT_ROLE $AWS_SERVICE_NAMESPACE $AWS_SERVICE_NAMESPACE_SUFFIX $AWS_EKS_DEPLOYMENT_NAME $AWS_IMAGE_TAG_BASE
     - export KUBECONFIG=/tmp/kubeconfig-${RANDOM}.yaml
