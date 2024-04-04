@@ -42,19 +42,12 @@ class DataPartitionInfoGetterSync(DataPartitionInfoGetter):
         return data_partition_info
 
 
-
 def get_tenant(data_partition_id: str) -> Tenant:
-    partition_url = os.getenv(
-        PARTITION_SERVICE_URL_KEY, "http://partition/api/partition/v1/")
-
+    partition_url = os.getenv(PARTITION_SERVICE_URL_KEY, "http://partition/api/partition/v1/")
     data_partition_info_getter = DataPartitionInfoGetterSync(partition_url)
     data_partition_info = data_partition_info_getter.get_partition_info(data_partition_id)
 
-    return Tenant(
-        data_partition_id=data_partition_id,
-        project_id="",
-        bucket_name=data_partition_info.bucket
-    )
+    return Tenant(data_partition_id=data_partition_id, project_id="", bucket_name=data_partition_info.bucket)
 
 
 def initialize_provider(app):

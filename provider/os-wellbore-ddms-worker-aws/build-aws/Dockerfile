@@ -12,7 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM python:3.10-slim-bullseye
+FROM public.ecr.aws/docker/library/alpine:3.19.1 as build
+
+LABEL version="1.0"
+LABEL maintainer="aws"
+
+ENV PYTHONUNBUFFERED=1
+ENV PATH="/app/.python/bin:${PATH}"
+
+RUN mkdir app
+RUN apk update
+RUN apk upgrade
+
+RUN apk add gcc musl-dev linux-headers python3-dev g++ bash build-base cmake jemalloc-dev boost-dev autoconf zlib-dev flex bison git tzdata lz4-dev
+RUN apk add py3-pip py3-pyarrow py3-numpy py3-six cython py3-pytest py3-cffi py3-cffi-pyc
+
+RUN python3 -m venv "/app/.python/" --system-site-packages
+
 ARG PIP_INDEX_URL
 
 COPY pyproject.toml ./
@@ -20,13 +36,38 @@ COPY README.md ./
 COPY LICENSE ./
 COPY ./src/wdmsworker ./src/wdmsworker
 
+WORKDIR /
 ENV PIP_EXTRA_INDEX_URL="https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple https://community.opengroup.org/api/v4/projects/148/packages/pypi/simple"
-RUN pip install -v .[aws]
+
+RUN /app/.python/bin/pip install setuptools==69.2.0
+RUN /app/.python/bin/pip install --no-cache-dir --upgrade -v .[aws]
+RUN apk del gcc musl-dev linux-headers python3-dev g++
+RUN apk --purge del apk-tools
+
+FROM public.ecr.aws/docker/library/alpine:3.19.1 as service
+
+RUN apk update
+RUN apk upgrade
+
+COPY --from=build /app /app
+
+RUN apk add bash autoconf flex bison tzdata lz4
+RUN apk add py3-pip py3-pyarrow py3-numpy py3-six cython py3-pytest py3-cffi py3-cffi-pyc
+
+ARG PIP_INDEX_URL
+
+COPY pyproject.toml ./
+COPY README.md ./
+COPY LICENSE ./
+COPY ./src/wdmsworker ./src/wdmsworker
+
+ENV PYTHONUNBUFFERED=1
+ENV PATH="/app/.python/bin:${PATH}"
 
 COPY provider/os-wellbore-ddms-worker-aws/build-aws/entrypoint.sh .
 COPY provider/os-wellbore-ddms-worker-aws/build-aws/osdu_api.ini .
 COPY provider/os-wellbore-ddms-worker-aws/build-aws/ssl.sh .
-ENV PYTHONPATH=./
+ENV PYTHONPATH=./src
 
 #Default to using self signed generated TLS cert
 ENV USE_SELF_SIGNED_SSL_CERT "true"
@@ -36,6 +77,5 @@ ENV SSL_ENABLED "true"
 
 
 EXPOSE ${APPLICATION_PORT}
-WORKDIR ./
 
 ENTRYPOINT ["/bin/sh", "-c", "/entrypoint.sh"]

@@ -131,9 +131,12 @@ async def resolve_single_conflict_group(
         final_df, max_values_per_chunk=WRITE_MAX_TOTAL_VALUES_COUNT, max_columns_per_chunk=WRITE_MAX_COLUMNS_COUNT
     )
 
-    resolved_chunk_meta = await gather(*[
-        upload_chunk(storage, tenant, ch, None, record_id, session_id, reference_curve=reference_curve) for ch in chunks
-    ])
+    resolved_chunk_meta = await gather(
+        *[
+            upload_chunk(storage, tenant, ch, None, record_id, session_id, reference_curve=reference_curve)
+            for ch in chunks
+        ]
+    )
     return list(resolved_chunk_meta)
 
 

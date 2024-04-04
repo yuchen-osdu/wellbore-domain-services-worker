@@ -26,6 +26,9 @@ env:
 
 phases:
   install:
+    runtime-versions:
+      java: corretto17
+      python: 3.11
     commands:
       # fix error noted here: https://github.com/yarnpkg/yarn/issues/7866
       - curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | apt-key add -
@@ -94,7 +97,7 @@ phases:
       - docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD}
 
       - echo "Building docker image..."
-      - docker build -f provider/os-wellbore-ddms-worker-aws/build-aws/Dockerfile -t ${ECR_IMAGE} .
+      - docker build -f provider/os-wellbore-ddms-worker-aws/build-aws/Dockerfile -t ${ECR_IMAGE} --build-arg IMAGE_NAME=$BASE_IMAGE .
       - docker tag  ${ECR_IMAGE} ${ECR_IMAGE_BRANCH_LATEST}
       - echo "Pushing docker image..."
       - docker push ${ECR_IMAGE}

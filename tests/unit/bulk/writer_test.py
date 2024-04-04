@@ -793,12 +793,14 @@ async def simulate_dask_commit(
             filename = generate_chunk_filename_dask_impl(ch)
             await storage.upload(tenant, storage_path_builder.join(root_session, f"{filename}.parquet"), ch_parquet)
 
-            meta_content = json.dumps({
-                "columns": list(ch.columns),
-                "dtypes": [str(dt) for dt in ch.dtypes],
-                "nb_rows": len(ch.index),
-                "index_hash": hashlib.sha1(ch.index.values).hexdigest(),
-            }).encode()
+            meta_content = json.dumps(
+                {
+                    "columns": list(ch.columns),
+                    "dtypes": [str(dt) for dt in ch.dtypes],
+                    "nb_rows": len(ch.index),
+                    "index_hash": hashlib.sha1(ch.index.values).hexdigest(),
+                }
+            ).encode()
 
             # later for catalog construction
             chunk_name_by_shape.setdefault(hashlib.sha1(".".join(sorted(ch.columns)).encode()).hexdigest(), []).append(
@@ -817,18 +819,22 @@ async def simulate_dask_commit(
     columns = []
     if as_conflicted:
         # in that case, only a single dir path is put inside the catalog, not one path per chunk
-        columns.append({
-            "labels": list(chunks[0].columns),  # all chunk have same column, take the first one then
-            "paths": [storage_path_builder.join("bulk", bulk_id, "data", conflicted_dir)],
-            "dtypes": [],
-        })
+        columns.append(
+            {
+                "labels": list(chunks[0].columns),  # all chunk have same column, take the first one then
+                "paths": [storage_path_builder.join("bulk", bulk_id, "data", conflicted_dir)],
+                "dtypes": [],
+            }
+        )
     else:
         for v in chunk_name_by_shape.values():
-            columns.append({
-                "labels": list(v[0][0].columns),  # all chunk have same column, take the first one then
-                "paths": [storage_path_builder.join("session", session_id, "data", f"{t[1]}.parquet") for t in v],
-                "dtypes": [],
-            })
+            columns.append(
+                {
+                    "labels": list(v[0][0].columns),  # all chunk have same column, take the first one then
+                    "paths": [storage_path_builder.join("session", session_id, "data", f"{t[1]}.parquet") for t in v],
+                    "dtypes": [],
+                }
+            )
 
     catalog_dict = {
         "recordId": record_id,

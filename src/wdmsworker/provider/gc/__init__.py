@@ -19,7 +19,12 @@ from urllib.parse import urljoin
 from aiohttp import ClientSession
 
 import requests
-from osdu_gcp.data_partition.data_partition_info import DataPartitionInfo, DataPartitionInfoGetter, GC_PROJECT_KEY, BUCKET_KEY
+from osdu_gcp.data_partition.data_partition_info import (
+    DataPartitionInfo,
+    DataPartitionInfoGetter,
+    GC_PROJECT_KEY,
+    BUCKET_KEY,
+)
 from osdu_gcp.storage.blob_storage_gcp import GCloudAioStorage
 from osdu.core.api.storage.tenant import Tenant
 
@@ -49,8 +54,7 @@ class DataPartitionInfoGetterSync(DataPartitionInfoGetter):
 
 
 def get_tenant(data_partition_id: str) -> Tenant:
-    partition_url = environ.get(
-        PARTITION_SERVICE_URL_KEY, "http://partition/api/partition/v1/")
+    partition_url = environ.get(PARTITION_SERVICE_URL_KEY, "http://partition/api/partition/v1/")
     credentials_from_env = environ.get(PROJECT_CREDENTIALS_KEY)
 
     data_partition_info_getter = DataPartitionInfoGetterSync(partition_url)
@@ -60,7 +64,7 @@ def get_tenant(data_partition_id: str) -> Tenant:
         data_partition_id=data_partition_id,
         project_id=data_partition_info.gc_project_id,
         credentials=credentials_from_env,
-        bucket_name=data_partition_info.bucket
+        bucket_name=data_partition_info.bucket,
     )
 
 
