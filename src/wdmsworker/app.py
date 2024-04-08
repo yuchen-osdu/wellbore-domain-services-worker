@@ -123,7 +123,14 @@ async def about_route(request: Request):
 # ---------------------------------------------------------------
 # ---------------------------------------------------------------
 
-app.add_exception_handler(BulkStatisticsHTTPException, http_stats_error_handler)
+
+@app.exception_handler(BulkStatisticsHTTPException)
+async def _http_stats_error_handler_wrapper(
+    request,
+    e: BulkStatisticsHTTPException,
+):
+    return await http_stats_error_handler(request, e)
+
 
 app.include_router(write_bulk_router)
 app.include_router(read_bulk_router)

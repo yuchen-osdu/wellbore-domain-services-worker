@@ -52,6 +52,7 @@ dev = [
     "flake8",
     "Flake8-pyproject",
     "pre-commit", # for adding git pre-commit hook to run flake8, mypy and black automatically
+    "types-requests", # for mypy support for requests
 ]
 
 pkg = [

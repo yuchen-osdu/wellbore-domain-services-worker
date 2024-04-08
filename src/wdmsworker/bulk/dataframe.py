@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-""" Module dataframe manipulation functions """
+"""Module dataframe manipulation functions"""
 
 import re
 from contextlib import suppress
