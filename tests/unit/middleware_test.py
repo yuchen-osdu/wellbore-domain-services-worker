@@ -246,7 +246,7 @@ def test_middlewares_order():
                 add_middlewares_to_app(super_app)
 
                 assert len(super_app.user_middleware) == 3
-                middlewares_name = [m.options["dispatch"]._mock_name for m in super_app.user_middleware]
+                middlewares_name = [m.kwargs["dispatch"]._mock_name for m in super_app.user_middleware]
                 assert middlewares_name[0] == "context_middleware", "Context middleware needs to be the first one "
 
 
