@@ -50,23 +50,21 @@ class BulkDataStatisticsResponse(StatisticsComputationMeta):
 
     data: Dict[str, CurveStatistics] = Field(
         title="Curves statistics' values",
-        examples=[
-            {
-                "CurveName": CurveStatistics(
-                    **{
-                        "mean": "450.8438",
-                        "std": "318.27778186518816",
-                        "min": "-100.0",
-                        "10%": "9.0",
-                        "50%": "451.0",
-                        "90%": "893.0",
-                        "max": "999.0",
-                        "totalCount": "100000",
-                        "nonAbsentValuesCount": "100000.0",
-                    }
-                )
-            }
-        ],
+        example={
+            "CurveName": CurveStatistics(
+                **{
+                    "mean": "450.8438",
+                    "std": "318.27778186518816",
+                    "min": "-100.0",
+                    "10%": "9.0",
+                    "50%": "451.0",
+                    "90%": "893.0",
+                    "max": "999.0",
+                    "totalCount": "100000",
+                    "nonAbsentValuesCount": "100000.0",
+                }
+            )
+        },
     )
 
     class Config:

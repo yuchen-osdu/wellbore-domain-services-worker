@@ -16,9 +16,17 @@ import requests
 import pytest
 
 
-@pytest.mark.parametrize("use_token", [True, False])
+@pytest.mark.parametrize(
+    "use_token,expected_status_code,expected_response",
+    [
+        (True, 404, ""),  # response is empty and should not contain "Not found"
+        (False, 403, "RBAC: access denied"),  # since recently, without token requests return 403 error
+    ],
+)
 @pytest.mark.parametrize("path", ["docs", "openapi.json", "about", "healthz", "data/unknown-record-id/unknown-id"])
-def test_service_not_reachable_externally(base_url, check_cert, token, path, use_token):
+def test_service_not_reachable_externally(
+    base_url, check_cert, token, path, use_token, expected_status_code, expected_response
+):
     """
     Test Worker service is not accessible from outside the cluster with or without a valid token.
     """
@@ -29,5 +37,7 @@ def test_service_not_reachable_externally(base_url, check_cert, token, path, use
         headers["Authorization"] = f"Bearer {token}"
 
     response = requests.request("GET", url, headers=headers, verify=check_cert)
-    assert response.status_code == 404, "Worker service should NOT be available from out of the cluster"
-    assert response.text == str(), "Response should be empty, because service was not reached"
+    assert response.status_code == expected_status_code, (
+        "Worker service should NOT be available from out of the " "cluster"
+    )
+    assert response.text in expected_response, f"Response '{response.text}' should contains '{expected_response}'"

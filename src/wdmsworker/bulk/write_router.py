@@ -66,7 +66,7 @@ async def post_bulk_chunk_in_session_route(
     except exc.BulkValidationError as e:
         get_logger().exception(f"validation error on write bulk for record {record_id}: {e}")
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
-    except (exc.TooManyValuesError, exc.TooManyValuesError) as e:
+    except (exc.TooManyValuesError, exc.TooManyColumnsError) as e:
         get_logger().error(f"too bug dataframe posted: {e}")
         # TODO this might actually be done/solved here, better be strict for now ...
         return to_json_response(
@@ -106,7 +106,7 @@ async def post_bulk_data_route(
     except exc.BulkValidationError as e:
         get_logger().error(f"Validation failure in post_bulk_data_route: {e}")
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
-    except (exc.TooManyValuesError, exc.TooManyValuesError) as e:
+    except (exc.TooManyValuesError, exc.TooManyColumnsError) as e:
         get_logger().error(f"too bug dataframe posted: {e}")
         # TODO this might actually be done/solved here, better be strict for now ...
         return to_json_response(
@@ -143,6 +143,8 @@ async def session_complete_route(
             storage, tenant, record_id, session_id, completion, from_bulk, reference
         )
         return WriteBulkResponse.construct(bulkid=bulk_id, describe=bulk_description)
+    except exc.TooManyConflictsToResolve as e:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, str(e))
     except exc.BulkCommitNoDataError as e:
         return to_json_response(
             ErrorWithTypeResponse(errorType=e.errorType, message=e.description),

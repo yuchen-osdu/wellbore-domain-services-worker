@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from functools import reduce
-from itertools import combinations
+from itertools import combinations, chain
 from typing import List, Dict, Set, Callable
 from asyncio import create_task, wait, gather
 
@@ -25,10 +25,10 @@ from osdu.core.api.storage.blob_storage_base import BlobStorageBase
 from .chunk_storage import upload_chunk, chunk_download_generator
 from .chunk_meta import ChunkMeta
 from .dataframe import split_into_chunks
-from .constants import WRITE_MAX_COLUMNS_COUNT, WRITE_MAX_TOTAL_VALUES_COUNT
-from .errors import BulkValidationError
+from .constants import WRITE_MAX_COLUMNS_COUNT, WRITE_MAX_TOTAL_VALUES_COUNT, WRITE_MAX_CONFLICTED_COLUMNS_COUNT
+from .errors import BulkValidationError, TooManyConflictsToResolve
 from .validators import validate_column_index_reference
-from ..capture_timings import capture_timings
+from ..capture_timings import capture_timings, timeit
 from ..logger import get_logger
 
 
@@ -108,13 +108,15 @@ async def resolve_single_conflict_group(
     }
 
     try:
-        merged_current = await merge_dataframes_from_storage(storage, tenant, current_chunks, auto_merge_dataframe)
+        with timeit("merged_current - resolve_single_conflict_group"):
+            merged_current = await merge_dataframes_from_storage(storage, tenant, current_chunks, auto_merge_dataframe)
 
         if previous_tasks:
             await wait(previous_tasks.values())
 
-            # TODO can be optimized
-            previous_df = reduce(combine_first_dataframe, (t.result() for t in previous_tasks.values()))
+            with timeit("previous_df - resolve_single_conflict_group"):
+                # TODO can be optimized
+                previous_df = reduce(combine_first_dataframe, (t.result() for t in previous_tasks.values()))
             previous_tasks.clear()
         else:
             previous_df = pd.DataFrame()
@@ -123,20 +125,23 @@ async def resolve_single_conflict_group(
             t.cancel()
         raise
 
-    # TODO must keep NaN values from current data, current should always overwrite
-    final_df = merged_current.combine_first(previous_df)
+    with timeit("final_df - resolve_single_conflict_group"):
+        # TODO must keep NaN values from current data, current should always overwrite
+        final_df = merged_current.combine_first(previous_df)
     validate_column_index_reference(final_df, reference_curve)
 
-    chunks = split_into_chunks(
-        final_df, max_values_per_chunk=WRITE_MAX_TOTAL_VALUES_COUNT, max_columns_per_chunk=WRITE_MAX_COLUMNS_COUNT
-    )
+    with timeit("split_into_chunks - resolve_single_conflict_group"):
+        chunks = split_into_chunks(
+            final_df, max_values_per_chunk=WRITE_MAX_TOTAL_VALUES_COUNT, max_columns_per_chunk=WRITE_MAX_COLUMNS_COUNT
+        )
 
-    resolved_chunk_meta = await gather(
-        *[
-            upload_chunk(storage, tenant, ch, None, record_id, session_id, reference_curve=reference_curve)
-            for ch in chunks
-        ]
-    )
+    with timeit("upload_chunk - resolve_single_conflict_group"):
+        resolved_chunk_meta = await gather(
+            *[
+                upload_chunk(storage, tenant, ch, None, record_id, session_id, reference_curve=reference_curve)
+                for ch in chunks
+            ]
+        )
     return list(resolved_chunk_meta)
 
 
@@ -164,6 +169,14 @@ async def resolve_conflicts(
     conflict_groups = find_conflicts(chunk_metas)
     if not conflict_groups:
         return chunk_metas
+
+    columns_number_in_conflict = sum(len(c.columns) for c in chain.from_iterable(conflict_groups))
+    get_logger().info(f"columns_number_in_conflict: {columns_number_in_conflict}")
+    if columns_number_in_conflict >= WRITE_MAX_CONFLICTED_COLUMNS_COUNT:
+        raise TooManyConflictsToResolve(
+            f"unable to resolve '{columns_number_in_conflict}' conflicted columns, please "
+            f"consider using several smaller bulk session."
+        )
 
     get_logger().info(f"resolving {len(conflict_groups)} group(s) in conflict")
     chunk_metas_without_conflict = [m for m in chunk_metas if not m.in_conflict]
