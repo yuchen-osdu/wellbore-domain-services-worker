@@ -109,6 +109,10 @@ class BulkCommitNoDataError(BulkError):
     description = "no data to commit"
 
 
+class TooManyConflictsToResolve(BulkError):
+    pass
+
+
 def map_errors(exception_mapping: Dict[Type[Exception], Type[BulkError]]):
     """
     Decorator to automatically map specific exception into a bulk error

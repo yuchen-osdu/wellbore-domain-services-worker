@@ -20,8 +20,8 @@ import pytest
 from osdu.core.api.storage.blob_storage_base import BlobStorageBase
 
 from wdmsworker.bulk.chunk_meta import ChunkMeta
-from wdmsworker.bulk.errors import BulkValidationError
-from wdmsworker.bulk.conflict import resolve_single_conflict_group, find_conflicts
+from wdmsworker.bulk.errors import BulkValidationError, TooManyConflictsToResolve
+from wdmsworker.bulk.conflict import resolve_single_conflict_group, find_conflicts, resolve_conflicts
 
 from ..generate_data import generate_df
 
@@ -396,3 +396,48 @@ def test_find_conflicts_perf():
     actual = {len(group): {ch.filename for ch in group} for group in result}
 
     assert actual == expected
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "chunk_count, conflict_exception_expected",
+    [
+        [9, False],  # produces 9_000 conflicts
+        [10, True],  # produces 10_000 conflicts
+        [11, True],  # produces 11_000 conflicts
+    ],
+)
+async def test_check_columns_number_in_conflict(
+    chunk_count,
+    conflict_exception_expected,
+    bulk_storage_mock: BlobStorageBase,
+):
+
+    ch = [
+        ChunkMeta(
+            filepath=f"{i}.c.meta",
+            columns=[f"C{i}[{j}]" for j in range(500)],
+            columns_hash="c",
+            index_start_end=ChunkMeta.ColumnStartEndValues("", start=i * 5, end=i * 5 + 4, dtype="int32"),
+            index_hash=str(i),
+            nb_rows=4,
+            dtypes=["int"],
+        )
+        for i in range(chunk_count)  # i*5
+    ]
+
+    routine = resolve_conflicts(
+        storage=bulk_storage_mock,
+        tenant=None,
+        record_id="record_id",
+        session_id="session_id",
+        session_chunk_metas=ch,
+        previous_chunk_metas=ch,
+    )
+    if conflict_exception_expected:
+        with pytest.raises(TooManyConflictsToResolve):
+            await routine
+    else:
+        with pytest.raises(ValueError):
+            # since chunk meta are fake, code fails after as expected with another error.
+            await routine
