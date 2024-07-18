@@ -27,6 +27,19 @@ spec:
           image: {{ .Values.data.gcImage | quote }}
           {{- end }}
           imagePullPolicy: {{ .Values.data.imagePullPolicy | quote }}
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /api/wdms-worker/healthz
+              port: 8080
+            initialDelaySeconds: 190
+            periodSeconds: 60
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /api/wdms-worker/readiness
+              port: 8080
+            periodSeconds: 60
           envFrom:
           - configMapRef:
               name: {{ .Values.conf.configmap | quote }}
