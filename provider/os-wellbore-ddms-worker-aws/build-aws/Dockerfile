@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM public.ecr.aws/docker/library/alpine:3.19.1 as build
+FROM public.ecr.aws/docker/library/alpine:3.19.4 as build
 
 LABEL version="1.0"
 LABEL maintainer="aws"
@@ -39,12 +39,12 @@ COPY ./src/wdmsworker ./src/wdmsworker
 WORKDIR /
 ENV PIP_EXTRA_INDEX_URL="https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple https://community.opengroup.org/api/v4/projects/148/packages/pypi/simple"
 
-RUN /app/.python/bin/pip install setuptools==69.2.0
+RUN /app/.python/bin/pip install setuptools==75.1.0
 RUN /app/.python/bin/pip install --no-cache-dir --upgrade -v .[aws]
 RUN apk del gcc musl-dev linux-headers python3-dev g++
 RUN apk --purge del apk-tools
 
-FROM public.ecr.aws/docker/library/alpine:3.19.1 as service
+FROM public.ecr.aws/docker/library/alpine:3.19.4 as service
 
 RUN apk update
 RUN apk upgrade
