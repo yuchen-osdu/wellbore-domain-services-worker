@@ -80,7 +80,8 @@ aws = [
 ]
 
 ibm = [
-    # TODO: add dependencies specific to ibm
+    "aiohttp>=3.8.0",
+    "osdu-core-lib-python-ibm==3.0.1",
 ]
 
 gc = [
