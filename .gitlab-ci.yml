@@ -44,6 +44,9 @@ include:
   - project: "osdu/platform/ci-cd-pipelines"
     file: "cloud-providers/aws-global.yml"
 
+  - project: "osdu/platform/ci-cd-pipelines"
+    file: "cloud-providers/ibm-wellbore-bulk-worker.yml"
+
 aws-containerize:
   needs: []
 
