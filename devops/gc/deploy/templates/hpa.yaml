@@ -1,0 +1,43 @@
+{{- if and (eq .Values.global.tier "PROD") (eq .Values.global.autoscaling true) }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ printf "%s-hpa" .Values.conf.appName | quote }}
+  namespace: {{ .Release.Namespace | quote }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ .Values.conf.appName | quote }}
+  minReplicas: {{ .Values.hpa.minReplicas }}
+  maxReplicas: {{ .Values.hpa.maxReplicas }}
+  metrics:
+    - type: External
+      external:
+        metric:
+          name: istio.io|service|server|request_count
+          selector:
+            matchLabels:
+              metric.labels.destination_workload_name: {{ .Values.conf.appName | quote }}
+        target:
+          target:
+          type: {{ .Values.hpa.targetType | quote }}
+          {{- if eq .Values.hpa.targetType "AverageValue" }}
+          averageValue: {{ .Values.hpa.targetValue }}
+          {{- else if eq .Values.hpa.targetType "Value" }}
+          value: {{ .Values.hpa.targetValue }}
+          {{- end }}
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: {{ .Values.hpa.behaviorScaleUpStabilizationWindowSeconds }}
+      policies:
+        - type: Percent
+          value: {{ .Values.hpa.behaviorScaleUpPoliciesValue }}
+          periodSeconds: {{ .Values.hpa.behaviorScaleUpPoliciesPeriodSeconds }}
+    scaleDown:
+      stabilizationWindowSeconds: {{ .Values.hpa.behaviorScaleDownStabilizationWindowSeconds }}
+      policies:
+        - type: Percent
+          value: {{ .Values.hpa.behaviorScaleDownPoliciesValue }}
+          periodSeconds: {{ .Values.hpa.behaviorScaleDownPoliciesPeriodSeconds }}
+{{- end }}

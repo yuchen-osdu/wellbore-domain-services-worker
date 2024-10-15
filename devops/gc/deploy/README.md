@@ -34,6 +34,8 @@ Detailed information about these variables is provided below.
 | **global.domain** | your domain for an external endpoint, ex `example.com` | string | `-` | yes |
 | **global.onPremEnabled** | whether on-prem is enabled | boolean | `false` | yes |
 | **global.limitsEnabled** | whether CPU and memory limits are enabled | boolean | `true` | yes |
+| **global.tier** | Only PROD must be used to enable autoscaling | string | "" | no |
+| **global.autoscaling** | enables horizontal pod autoscaling, when tier=PROD | boolean | true | yes |
 
 ### Configmap Variables
 
@@ -62,6 +64,29 @@ Detailed information about these variables is provided below.
 | **conf.configmap** | configmap to be used | string | `wellbore-worker-config` | yes |
 | **conf.minioSecretName** | MinIO secret name | string | `wellbore-minio-secret` | yes |
 | **conf.replicas** | Number of replicas for the application k8s deployment | digit | `1` | yes |
+
+### Horizontal Pod Autoscaling (HPA) variables (works only if tier=PROD and autoscaling=true)
+
+| Name | Description | Type | Default |Required |
+|------|-------------|------|---------|---------|
+| **hpa.minReplicas** | minimum number of replicas | integer | 6 | only if `global.autoscaling` is true and `global.tier` is PROD |
+| **hpa.maxReplicas** | maximum number of replicas | integer | 15 | only if `global.autoscaling` is true and `global.tier` is PROD |
+| **hpa.targetType** | type of measurements: AverageValue or Value | string | "AverageValue" | only if `global.autoscaling` is true and `global.tier` is PROD |
+| **hpa.targetValue** | threshold value to trigger the scaling up | integer | 140 | only if `global.autoscaling` is true and `global.tier` is PROD |
+| **hpa.behaviorScaleUpStabilizationWindowSeconds** | time to start implementing the scale up when it is triggered | integer | 10 | only if `global.autoscaling` is true and `global.tier` is PROD |
+| **hpa.behaviorScaleUpPoliciesValue** | the maximum number of new replicas to create (in percents from current state)| integer | 50 | only if `global.autoscaling` is true and `global.tier` is PROD |
+| **hpa.behaviorScaleUpPoliciesPeriodSeconds** | pause for every new scale up decision | integer | 15 | only if `global.autoscaling` is true and `global.tier` is PROD |
+| **hpa.behaviorScaleDownStabilizationWindowSeconds** | time to start implementing the scale down when it is triggered | integer | 60 | only if `global.autoscaling` is true and `global.tier` is PROD |
+| **hpa.behaviorScaleDownPoliciesValue** | the maximum number of replicas to destroy (in percents from current state) | integer | 25 | only if `global.autoscaling` is true and `global.tier` is PROD |
+| **hpa.behaviorScaleDownPoliciesPeriodSeconds** | pause for every new scale down decision | integer | 60 | only if `global.autoscaling` is true and `global.tier` is PROD |
+
+### Limits variables
+
+| Name | Description | Type | Default |Required |
+|------|-------------|------|---------|---------|
+| **limits.maxTokens** | maximum number of requests per fillInterval | integer | 80 | only if `global.autoscaling` is true and `global.tier` is PROD |
+| **limits.tokensPerFill** | number of new tokens allowed every fillInterval | integer | 80 | only if `global.autoscaling` is true and `global.tier` is PROD |
+| **limits.fillInterval** | time interval | string | "1s" | only if `global.autoscaling` is true and `global.tier` is PROD |
 
 ### Installing the Helm Chart
 
