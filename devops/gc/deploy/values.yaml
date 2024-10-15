@@ -2,6 +2,8 @@ global:
   domain: ""
   onPremEnabled: false
   limitsEnabled: true
+  tier: ""
+  autoscaling: true
 
 data:
   # Configmaps
@@ -21,3 +23,20 @@ conf:
   appName: "wellbore-worker"
   minioSecretName: "wellbore-minio-secret"
   replicas: 1
+
+hpa:
+  minReplicas: 6
+  maxReplicas: 15
+  targetType: "AverageValue"
+  targetValue: 86 # 50*0.86*2
+  behaviorScaleUpStabilizationWindowSeconds: 10
+  behaviorScaleUpPoliciesValue: 50
+  behaviorScaleUpPoliciesPeriodSeconds: 15
+  behaviorScaleDownStabilizationWindowSeconds: 60
+  behaviorScaleDownPoliciesValue: 25
+  behaviorScaleDownPoliciesPeriodSeconds: 60
+
+limits:
+  maxTokens: 50
+  tokensPerFill: 50
+  fillInterval: "1s"

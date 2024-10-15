@@ -1,0 +1,43 @@
+{{- if and (eq .Values.global.tier "PROD") (eq .Values.global.autoscaling true) }}
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: {{ printf "%s-ratelimit" .Values.conf.appName | quote }}
+  namespace: {{ .Release.Namespace | quote }}
+spec:
+  workloadSelector:
+    labels:
+      app: {{ .Values.conf.appName | quote }}
+  configPatches:
+    - applyTo: "HTTP_FILTER"
+      match:
+        context: "SIDECAR_INBOUND"
+        listener:
+          filterChain:
+            filter:
+              name: "envoy.filters.network.http_connection_manager"
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: "envoy.filters.http.local_ratelimit"
+          typed_config:
+            '@type': "type.googleapis.com/udpa.type.v1.TypedStruct"
+            type_url: "type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit"
+            value:
+              stat_prefix: "http_local_rate_limiter"
+              enable_x_ratelimit_headers: "DRAFT_VERSION_03"
+              token_bucket:
+                max_tokens: {{ .Values.limits.maxTokens }}
+                tokens_per_fill: {{ .Values.limits.tokensPerFill }}
+                fill_interval: {{ .Values.limits.fillInterval  | quote}}
+              filter_enabled:
+                runtime_key: "local_rate_limit_enabled"
+                default_value:
+                  numerator: 100
+                  denominator: "HUNDRED"
+              filter_enforced:
+                runtime_key: "local_rate_limit_enforced"
+                default_value:
+                  numerator: 100
+                  denominator: "HUNDRED"
+{{- end }}
