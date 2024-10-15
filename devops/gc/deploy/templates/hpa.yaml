@@ -20,7 +20,6 @@ spec:
             matchLabels:
               metric.labels.destination_workload_name: {{ .Values.conf.appName | quote }}
         target:
-          target:
           type: {{ .Values.hpa.targetType | quote }}
           {{- if eq .Values.hpa.targetType "AverageValue" }}
           averageValue: {{ .Values.hpa.targetValue }}
