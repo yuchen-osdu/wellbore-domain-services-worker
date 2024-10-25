@@ -29,13 +29,6 @@ gc-containerize-gcr:
   variables:
     BUILD_PATH: "./devops/gc/Dockerfile"
 
-gc-containerize-gcr:baremetal:
-  extends: gc-containerize-gcr
-  needs: []
-  variables:
-    BUILD_PATH: "./devops/baremetal/Dockerfile"
-    IMAGE_NAME: bm-$GC_SERVICE
-
 gc-helm-charts-gitlab:
   needs:
     - "gc-containerize-gitlab"
