@@ -135,27 +135,6 @@ gc-test-python:
     - exists:
         - never/existing/file.txt
 
-# BM
-gc-baremetal-deploy:
-  needs:
-    - "gc-containerize-gitlab:baremetal"
-    - "gc-helm-charts-gitlab"
-  variables:
-    GC_SA_EMAIL: $GC_SA_GKE_EMAIL
-    IMAGE_NAME: bm-$GC_SERVICE
-  before_script:
-    - echo "Deploying a new App version..."
-
-gc-baremetal-osdutest:
-  rules:
-    - exists:
-        - never/existing/file.txt
-
-gc-baremetal-test-python:
-  rules:
-    - exists:
-        - never/existing/file.txt
-
 # DEV2
 gc-dev2-deploy:
   before_script:
