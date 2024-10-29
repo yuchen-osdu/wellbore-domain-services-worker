@@ -24,7 +24,8 @@ dependencies = [
     "numpy<2.0.0",
     "pyarrow>=14.0.1",
     "natsort",
-    "fastapi~=0.109.1",
+    "fastapi~=0.115.2",
+    "starlette~=0.40.0",
     "anyio<4",  # major 4 introduced breaking changes on exception management on task group
     "uvicorn",
     "opencensus",
