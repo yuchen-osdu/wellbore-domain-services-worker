@@ -20,7 +20,7 @@ env:
     DOCKER_PASSWORD: /osdu/devops/docker_credentials:password
     SONAR_USERNAME: /osdu/devops/sonar_credentials:username
     SONAR_PASSWORD: /osdu/devops/sonar_credentials:password
-  
+
   parameter-store:
     SONAR_URL: /osdu/devops/sonar_url
 
@@ -36,10 +36,10 @@ phases:
       - apt-get update -y
       - wget -nv https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-4.6.2.2472.zip
       - unzip -q ./sonar-scanner-cli-4.6.2.2472.zip
-    
+
       - python3 -m pip install --upgrade pip
       - pip3 install safety
-      
+
       # Install git secrets
       #TODO temporarily adding hotfix, due to https://github.com/awslabs/git-secrets/issues/220
       - export SAY_LOCATION=`ln -s "$(which echo)" say`
@@ -87,12 +87,13 @@ phases:
       # using jar instead of executable since exe requires 32 bit image and doesn't work on codebuild 4.0
       - |
         java -jar sonar-scanner-4.6.2.2472/lib/sonar-scanner-cli-4.6.2.2472.jar -Dsonar.projectKey=wellbore-ddms-worker -Dsonar.host.url=${SONAR_URL} \
-          -Dsonar.login=${SONAR_USERNAME} -Dsonar.password=${SONAR_PASSWORD} -Dsonar.branch.name=${BRANCH_NAME} -Dsonar.python.coverage.reportPaths=coverage.xml
+          -Dsonar.login=${SONAR_USERNAME} -Dsonar.password=${SONAR_PASSWORD} -Dsonar.branch.name=${BRANCH_NAME} -Dsonar.python.coverage.reportPaths=coverage.xml \
+          -Dsonar.sources=src/wdmsworker/provider/aws
 
       - sed -i "s|__CONTAINER__|$ECR_IMAGE|"  devops/aws/chart/values.yaml
       - echo "--Copying Helm Charts to ${OUTPUT_DIR:-dist}--"
       - rsync -r devops/aws/* "${OUTPUT_DIR:-dist}"
-      
+
       - echo "Logging into Docker Hub..."
       - docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD}
 
