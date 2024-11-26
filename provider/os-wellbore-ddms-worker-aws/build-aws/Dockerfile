@@ -54,6 +54,9 @@ COPY --from=build /app /app
 RUN apk add bash autoconf flex bison tzdata lz4
 RUN apk add py3-pip py3-pyarrow py3-numpy py3-six cython py3-pytest py3-cffi py3-cffi-pyc
 
+RUN addgroup -S -g 10001 appgroup \ 
+ && adduser -S -H -u 10001 -G appgroup appuser
+
 ARG PIP_INDEX_URL
 
 COPY pyproject.toml ./
@@ -78,4 +81,5 @@ ENV SSL_ENABLED "true"
 
 EXPOSE ${APPLICATION_PORT}
 
+USER 10001:10001
 ENTRYPOINT ["/bin/sh", "-c", "/entrypoint.sh"]
