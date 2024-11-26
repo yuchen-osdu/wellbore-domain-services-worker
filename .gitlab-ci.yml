@@ -68,6 +68,7 @@ stages:
   - deploy
   - bootstrap
   - integration
+  - acceptance
   - performance-testing
   - publish
   - deploy_preship
@@ -113,6 +114,11 @@ service-tests:
         path: coverage.xml
 
 trigger-trusted-tests:
+  image: $CI_REGISTRY/osdu/platform/trusted-mr-container
+  before_script:
+    - echo "overriding before script"
+
+trusted-merge-branch-verification:
   image: $CI_REGISTRY/osdu/platform/trusted-mr-container
   before_script:
     - echo "overriding before script"
