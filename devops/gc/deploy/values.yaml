@@ -22,7 +22,7 @@ conf:
   configmap: "wellbore-worker-config"
   appName: "wellbore-worker"
   minioSecretName: "wellbore-minio-secret"
-  replicas: 1
+  replicas: 2
 
 hpa:
   minReplicas: 6
