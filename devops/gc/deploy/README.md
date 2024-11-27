@@ -63,7 +63,7 @@ Detailed information about these variables is provided below.
 | **conf.appName** | Service name | string | `wellbore-worker` | yes |
 | **conf.configmap** | configmap to be used | string | `wellbore-worker-config` | yes |
 | **conf.minioSecretName** | MinIO secret name | string | `wellbore-minio-secret` | yes |
-| **conf.replicas** | Number of replicas for the application k8s deployment | digit | `1` | yes |
+| **conf.replicas** | Number of replicas for the application k8s deployment | digit | `2` | yes |
 
 ### Horizontal Pod Autoscaling (HPA) variables (works only if tier=PROD and autoscaling=true)
 
