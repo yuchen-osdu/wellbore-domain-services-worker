@@ -97,12 +97,10 @@ phases:
       - echo "Logging into Docker Hub..."
       - docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD}
 
-      - echo "Building docker image..."
-      - docker build -f provider/os-wellbore-ddms-worker-aws/build-aws/Dockerfile -t ${ECR_IMAGE} --build-arg IMAGE_NAME=$BASE_IMAGE .
-      - docker tag  ${ECR_IMAGE} ${ECR_IMAGE_BRANCH_LATEST}
-      - echo "Pushing docker image..."
-      - docker push ${ECR_IMAGE}
-      - docker push ${ECR_IMAGE_BRANCH_LATEST}
+      - echo "Build and push docker image..."
+      - docker buildx create --driver docker-container --use
+      - docker buildx inspect --bootstrap
+      - docker buildx build --platform linux/arm64/v8,linux/amd64 --pull --push --build-arg IMAGE_NAME=$BASE_IMAGE -f provider/os-wellbore-ddms-worker-aws/build-aws/Dockerfile -t ${ECR_IMAGE} -t ${ECR_IMAGE_BRANCH_LATEST} .
 artifacts:
   files:
     - "**/*"
