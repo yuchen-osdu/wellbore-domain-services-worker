@@ -90,10 +90,6 @@ phases:
           -Dsonar.login=${SONAR_USERNAME} -Dsonar.password=${SONAR_PASSWORD} -Dsonar.branch.name=${BRANCH_NAME} -Dsonar.python.coverage.reportPaths=coverage.xml \
           -Dsonar.sources=src/wdmsworker/provider/aws
 
-      - sed -i "s|__CONTAINER__|$ECR_IMAGE|"  devops/aws/chart/values.yaml
-      - echo "--Copying Helm Charts to ${OUTPUT_DIR:-dist}--"
-      - rsync -r devops/aws/* "${OUTPUT_DIR:-dist}"
-
       - echo "Logging into Docker Hub..."
       - docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD}
 
