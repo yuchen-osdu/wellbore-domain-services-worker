@@ -6,6 +6,6 @@ metadata:
   name: {{ .Values.conf.configmap | quote }}
   namespace: {{ .Release.Namespace | quote }}
 data:
-  CLOUD_PROVIDER: "gc"
+  CLOUD_PROVIDER: "baremetal"
   SERVICE_NAME: {{ .Values.conf.appName | quote }}
   OPENAPI_PREFIX: {{ .Values.data.openapiPrefix | quote }}

@@ -1,6 +1,5 @@
 global:
   domain: ""
-  onPremEnabled: false
   limitsEnabled: true
   tier: ""
   autoscaling: true
@@ -14,7 +13,6 @@ data:
   limitsCpu: "1"
   limitsMemory: "1G"
   gcImage: "community.opengroup.org:5555/osdu/platform/domain-data-mgmt-services/wellbore/wellbore-domain-services-worker/gc-wellbore-worker-master:latest"
-  bmImage: "community.opengroup.org:5555/osdu/platform/domain-data-mgmt-services/wellbore/wellbore-domain-services-worker/bm-wellbore-worker-master:latest"
   imagePullPolicy: "IfNotPresent"
   serviceAccountName: "wellbore-worker"
 
