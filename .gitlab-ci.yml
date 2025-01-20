@@ -42,6 +42,10 @@ include:
   - local: "devops/gc/pipeline/override-stages.yml"
 
   - project: "osdu/platform/ci-cd-pipelines"
+    file: "cloud-providers/core-global.yml"
+  - local: "devops/core-plus/pipeline/override-stages.yml"
+
+  - project: "osdu/platform/ci-cd-pipelines"
     file: "cloud-providers/aws-global.yml"
 
   - project: "osdu/platform/ci-cd-pipelines"

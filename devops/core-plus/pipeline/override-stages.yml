@@ -1,0 +1,23 @@
+variables:
+  CORE_SERVICE: wellbore-worker
+  CORE_INT_TEST_TYPE: python
+
+
+core-containerize-gitlab:
+  needs: []
+  variables:
+    CORE_BUILD_PATH: "./devops/core-plus/Dockerfile"
+  before_script:
+    - echo "Building a new Docker image..."
+
+core-containerize-bootstrap-gitlab:
+  needs: []
+
+core-deploy:
+  before_script:
+    - echo "Deploying a new App version..."
+
+core-test-python:
+  rules:
+    - exists:
+        - never/existing/file.txt

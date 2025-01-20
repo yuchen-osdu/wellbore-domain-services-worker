@@ -32,7 +32,6 @@ Detailed information about these variables is provided below.
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|----------|
 | **global.domain** | your domain for an external endpoint, ex `example.com` | string | `-` | yes |
-| **global.onPremEnabled** | whether on-prem is enabled | boolean | `false` | yes |
 | **global.limitsEnabled** | whether CPU and memory limits are enabled | boolean | `true` | yes |
 | **global.tier** | Only PROD must be used to enable autoscaling | string | "" | no |
 | **global.autoscaling** | enables horizontal pod autoscaling, when tier=PROD | boolean | true | yes |
@@ -52,7 +51,6 @@ Detailed information about these variables is provided below.
 | **data.limitsCpu** | CPU limit | string | `1` | only if `global.limitsEnabled` is true |
 | **data.limitsMemory** | memory limit | string | `1G` | only if `global.limitsEnabled` is true |
 | **data.gcImage** | Service image for GC env | string | `community.opengroup.org:5555/osdu/platform/domain-data-mgmt-services/wellbore/wellbore-domain-services-worker/gc-wellbore-worker-master:latest` | yes |
-| **data.bmImage** | Service image for BM env | string | `community.opengroup.org:5555/osdu/platform/domain-data-mgmt-services/wellbore/wellbore-domain-services-worker/bm-wellbore-worker-master:latest` | yes |
 | **data.imagePullPolicy** | when to pull image | string | `IfNotPresent` | yes |
 | **data.serviceAccountName** | k8s service account name for the application | string | `wellbore-worker` | yes |
 
@@ -62,7 +60,6 @@ Detailed information about these variables is provided below.
 |------|-------------|------|---------|---------|
 | **conf.appName** | Service name | string | `wellbore-worker` | yes |
 | **conf.configmap** | configmap to be used | string | `wellbore-worker-config` | yes |
-| **conf.minioSecretName** | MinIO secret name | string | `wellbore-minio-secret` | yes |
 | **conf.replicas** | Number of replicas for the application k8s deployment | digit | `2` | yes |
 
 ### Horizontal Pod Autoscaling (HPA) variables (works only if tier=PROD and autoscaling=true)
