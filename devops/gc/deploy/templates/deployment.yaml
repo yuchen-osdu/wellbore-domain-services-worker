@@ -51,3 +51,8 @@ spec:
               memory: {{ .Values.data.limitsMemory | quote }}
             {{- end }}
       serviceAccountName: {{ .Values.data.serviceAccountName | quote }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 0
