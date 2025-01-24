@@ -1,6 +1,7 @@
 variables:
   CORE_SERVICE: wellbore-worker
   CORE_INT_TEST_TYPE: python
+  CORE_SUPPORTED_PLATFORM: "linux/amd64"
 
 
 core-containerize-gitlab:

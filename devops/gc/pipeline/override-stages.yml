@@ -1,6 +1,7 @@
 variables:
   GC_SERVICE: wellbore-worker
   GC_INT_TEST_TYPE: python
+  GC_SUPPORTED_PLATFORM: "linux/amd64"
 
 gc-containerize-bootstrap-gitlab:
   needs: []
