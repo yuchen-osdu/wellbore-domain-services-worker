@@ -13,8 +13,6 @@ gc-containerize-gitlab:
   needs: []
   variables:
     BUILD_PATH: "./devops/gc/Dockerfile"
-  before_script:
-    - echo "Building a new Docker image..."
 
 gc-containerize-gcr:
   needs: []

@@ -8,8 +8,6 @@ core-containerize-gitlab:
   needs: []
   variables:
     CORE_BUILD_PATH: "./devops/core-plus/Dockerfile"
-  before_script:
-    - echo "Building a new Docker image..."
 
 core-containerize-bootstrap-gitlab:
   needs: []
