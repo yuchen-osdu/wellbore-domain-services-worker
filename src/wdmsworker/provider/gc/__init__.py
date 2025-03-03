@@ -28,7 +28,6 @@ from osdu_gcp.data_partition.data_partition_info import (
 from osdu_gcp.storage.blob_storage_gcp import GCloudAioStorage
 from osdu.core.api.storage.tenant import Tenant
 
-
 PARTITION_SERVICE_URL_KEY = "SERVICE_URL_PARTITION"
 PROJECT_CREDENTIALS_KEY = "OS_WELLBORE_DDMS_DATA_PROJECT_CREDENTIALS"
 

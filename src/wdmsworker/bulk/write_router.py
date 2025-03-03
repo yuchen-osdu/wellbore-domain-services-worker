@@ -24,7 +24,6 @@ from . import writer
 from . import errors as exc
 from ..logger import get_logger
 
-
 write_bulk_router = APIRouter()
 
 
