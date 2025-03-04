@@ -19,7 +19,6 @@ from osdu_baremetal.storage.storage_baremetal import S3Storage
 from osdu.core.api.storage.tenant import Tenant
 import requests
 
-
 PARTITION_SERVICE_URL_KEY = "SERVICE_URL_PARTITION"
 
 
