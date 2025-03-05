@@ -78,7 +78,7 @@ stages:
   - deploy_preship
 
 linters-check:
-  image: python:3.10-slim-bullseye
+  image: python:3.11-slim-bullseye
   tags: ["osdu-small"]
   stage: linting
   script:
@@ -88,7 +88,7 @@ linters-check:
     - mypy ./src
 
 unit-tests:
-  image: python:3.10-slim-bullseye
+  image: python:3.11-slim-bullseye
   tags: ["osdu-medium"]
   stage: testing
   script:
@@ -106,7 +106,7 @@ unit-tests:
         path: coverage.xml
 
 service-tests:
-  image: python:3.10-slim-bullseye
+  image: python:3.11-slim-bullseye
   tags: ["osdu-medium"]
   stage: testing
   script:
