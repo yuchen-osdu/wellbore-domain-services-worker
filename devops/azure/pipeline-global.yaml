@@ -67,3 +67,10 @@ jobs:
       parameters:
         python_version: '3.11'
         uploadDevPkg: ${{ parameters.uploadDevPkg }}
+  - job: docker_build
+    dependsOn: unit_tests_python_3_11
+    condition: succeeded()
+    steps:
+      - bash: |
+          docker build -f deployment/wdms-worker.DockerFile -t wdms-worker .
+        displayName: 'Docker build'

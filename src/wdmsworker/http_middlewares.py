@@ -19,16 +19,13 @@ from fastapi import Request
 from starlette.status import HTTP_500_INTERNAL_SERVER_ERROR
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from opencensus.trace import tracer as open_tracer
-from opencensus.trace.samplers import AlwaysOnSampler
-from opencensus.trace.span import SpanKind
-from opencensus.trace.propagation.trace_context_http_header_format import TraceContextPropagator
-from opencensus.trace.attributes_helper import COMMON_ATTRIBUTES
+from opentelemetry import trace
+from opentelemetry.semconv.trace import SpanAttributes
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+from opentelemetry.trace import Status, StatusCode, SpanKind
 
 from . import constants
 
-# Class used to propagate traces through requests' header
-_trace_propagator = TraceContextPropagator()
 # endpoints suffix to be ignored by traces
 _paths_suffix_to_skip = tuple(["healthz", "readiness", "liveness"])
 
@@ -61,55 +58,36 @@ async def logging_exception_middleware(request: Request, call_next):
 
 
 def _add_request_attributes_to_span(request, response, span):
-    """Add request's attributes into the given opencensus span"""
-    span.add_attribute(
-        attribute_key=constants.CORRELATION_ID_HEADER_NAME,
-        attribute_value=request.headers.get(constants.CORRELATION_ID_HEADER_NAME),
-    )
-    span.add_attribute(
-        attribute_key=constants.PARTITION_ID_HEADER_NAME,
-        attribute_value=request.headers.get(constants.PARTITION_ID_HEADER_NAME),
-    )
-    span.add_attribute(
-        attribute_key=constants.REQUEST_ID_HEADER_NAME,
-        attribute_value=request.headers.get(constants.REQUEST_ID_HEADER_NAME),
-    )
+    """Add request's attributes into the given tracing span"""
 
-    span.add_attribute(
-        attribute_key=constants.X_USER_ID_HEADER_NAME,
-        attribute_value=request.headers.get(constants.X_USER_ID_HEADER_NAME),
-    )
+    if correlation_id_header := request.headers.get(constants.CORRELATION_ID_HEADER_NAME):
+        span.set_attribute(constants.CORRELATION_ID_HEADER_NAME, correlation_id_header)
+    if partition_id_header := request.headers.get(constants.PARTITION_ID_HEADER_NAME):
+        span.set_attribute(constants.PARTITION_ID_HEADER_NAME, partition_id_header)
+    if request_id_header := request.headers.get(constants.REQUEST_ID_HEADER_NAME):
+        span.set_attribute(constants.REQUEST_ID_HEADER_NAME, request_id_header)
+    if user_id_header := request.headers.get(constants.X_USER_ID_HEADER_NAME):
+        span.set_attribute(constants.X_USER_ID_HEADER_NAME, user_id_header)
+    if app_id_header := request.headers.get(constants.APP_ID_HEADER_NAME):
+        span.set_attribute(constants.APP_ID_HEADER_NAME, app_id_header)
 
-    span.add_attribute(
-        attribute_key=constants.APP_ID_HEADER_NAME,
-        attribute_value=request.headers.get(constants.APP_ID_HEADER_NAME),
-    )
-
-    span.add_attribute(attribute_key=COMMON_ATTRIBUTES["HTTP_METHOD"], attribute_value=request.method)
-    span.add_attribute(attribute_key=COMMON_ATTRIBUTES["HTTP_ROUTE"], attribute_value=request.url.path)
-    span.add_attribute(attribute_key=COMMON_ATTRIBUTES["HTTP_URL"], attribute_value=str(request.url))
+    span.set_attribute(SpanAttributes.HTTP_METHOD, request.method)
+    span.set_attribute(SpanAttributes.HTTP_ROUTE, request.url.path)
+    span.set_attribute(SpanAttributes.HTTP_URL, str(request.url))
 
     response_status = response.status_code if response else HTTP_500_INTERNAL_SERVER_ERROR
-    span.add_attribute(attribute_key=COMMON_ATTRIBUTES["HTTP_STATUS_CODE"], attribute_value=response_status)
+    span.set_attribute(SpanAttributes.HTTP_STATUS_CODE, response_status)
 
-    response_content_length = response.headers.get("Content-Length") if response else None
-    span.add_attribute(attribute_key="response.header Content-length", attribute_value=response_content_length)
+    if response_content_length := response.headers.get("Content-Length", None) if response else None:
+        span.set_attribute("response.header Content-length", response_content_length)
 
     # this field is filled only after request is performed
-    if request.scope.get("route"):
-        span.add_attribute(
-            attribute_key=COMMON_ATTRIBUTES["HTTP_ROUTE"], attribute_value=request.scope.get("route").path
-        )
+    http_route = request.scope["route"].path if "route" in request.scope else request.scope["path"]
+    span.set_attribute(SpanAttributes.HTTP_ROUTE, http_route)
 
 
-def _retrieve_traces_exporter(request: Request):
-    """Return traces exporter store in App from Request if exists else None"""
-    if request and request.app:
-        try:
-            return request.app.state.traces_exporter
-        except AttributeError:
-            pass
-    return None
+def get_tracer():
+    return trace.get_tracer(__name__)
 
 
 async def tracing_middleware(request: Request, call_next):
@@ -123,30 +101,24 @@ async def tracing_middleware(request: Request, call_next):
     if request.url.path.endswith(_paths_suffix_to_skip):
         return await call_next(request)
 
-    # Create tracing context, from headers if exists, else create a new one
-    span_context = _trace_propagator.from_headers(request.headers)
+    tracer = get_tracer()
+    tracing_ctx = TraceContextTextMapPropagator().extract(carrier=request.headers)
 
-    tracer = open_tracer.Tracer(
-        span_context=span_context,
-        sampler=AlwaysOnSampler(),
-        propagator=_trace_propagator,
-        exporter=_retrieve_traces_exporter(request),
-    )
-
-    ctx = get_context()
-    if ctx:
-        ctx.tracer = tracer
-
-    with tracer.span(request.url.path) as parent_span:
-        parent_span.span_kind = SpanKind.SERVER
-        response = await call_next(request)
-        _add_request_attributes_to_span(request, response, tracer.current_span())
-        return response
+    with tracer.start_as_current_span(name=request.url.path, kind=SpanKind.SERVER, context=tracing_ctx) as span:
+        response = None
+        try:
+            response = await call_next(request)
+            return response
+        except Exception as e:
+            span.record_exception(e)
+            span.set_status(Status(StatusCode.ERROR))
+            raise
+        finally:
+            _add_request_attributes_to_span(request, response, span)
 
 
 @dataclass
 class ServiceContext:
-    tracer = None
     logger = None
 
 

@@ -1,15 +1,18 @@
 import logging
 import re
+from unittest import mock
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from unittest import mock
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.semconv.trace import SpanAttributes
+from opentelemetry.trace import SpanKind, format_trace_id
+from opentelemetry.sdk.trace.export import SpanExporter, SimpleSpanProcessor
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
-from opencensus.trace import tracer as open_tracer
-from opencensus.trace.attributes_helper import COMMON_ATTRIBUTES
-from opencensus.trace.propagation.trace_context_http_header_format import TraceContextPropagator
-from opencensus.trace.samplers import AlwaysOnSampler
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from wdmsworker import constants
@@ -26,6 +29,7 @@ from wdmsworker.http_middlewares import (
     context_middleware,
     get_context,
     add_middlewares_to_app,
+    get_tracer,
 )
 from wdmsworker.logger import get_logger, RequestContextAdapter
 
@@ -53,15 +57,33 @@ def test_logging_middleware():
         mock_logger().exception.assert_called_with("Exception occurred when calling: '/raising-route'")
 
 
+class ExporterInTest(SpanExporter):
+    """Initialize traces exporter in app with a custom one to allow validating our traces"""
+
+    def __init__(self) -> None:
+        self.exported = []
+
+    def export(self, spans: list):
+        self.exported += spans
+
+    def shutdown(self) -> None:
+        pass
+
+
 @pytest.fixture()
 def _setup_app_with_tracing_middleware():
     from wdmsworker.bulk import read_router
 
-    mock_exporter = mock.Mock()
-
     app = FastAPI()
-    app.state.traces_exporter = mock_exporter
     app.add_middleware(BaseHTTPMiddleware, dispatch=tracing_middleware)
+
+    provider = trace.get_tracer_provider()
+    if not isinstance(provider, TracerProvider):
+        provider = TracerProvider()
+        trace.set_tracer_provider(provider)
+
+    exporter = ExporterInTest()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
 
     app.dependency_overrides[accept_dependency] = lambda: None
     app.dependency_overrides[json_orient_dependency] = lambda: None
@@ -75,7 +97,7 @@ def _setup_app_with_tracing_middleware():
         pass
 
     client = TestClient(app)
-    yield client, mock_exporter
+    yield client, exporter
 
 
 def _extract_span_data_from_mock(_mock_exporter, call_index):
@@ -85,25 +107,26 @@ def _extract_span_data_from_mock(_mock_exporter, call_index):
 
 
 def test_ensure_parent_tracing_is_used(_setup_app_with_tracing_middleware):
-    client, mock_exporter = _setup_app_with_tracing_middleware
+    client, testing_exporter = _setup_app_with_tracing_middleware
 
     client.get("/tracing-route")
+    span_data_no_parent = testing_exporter.exported[0]
+    assert span_data_no_parent.kind == SpanKind.SERVER
+    assert span_data_no_parent.parent is None
 
-    span_data = _extract_span_data_from_mock(mock_exporter, 0)
-    assert span_data.parent_span_id is None
+    version = "00"
+    trace_id = "80f22fa582f64d2584e76b4aac231f12"
+    span_id = "7f522a92333490ec"
+    trace_options = "01"
+    parent_tracing_headers = {"traceparent": f"{version}-{trace_id}-{span_id}-{trace_options}"}
 
-    fake_wdms_parent_tracer = open_tracer.Tracer(sampler=AlwaysOnSampler(), propagator=TraceContextPropagator())
-    with fake_wdms_parent_tracer.span("wdms-url") as parent_span:
-        parent_tracing_headers = TraceContextPropagator().to_headers(fake_wdms_parent_tracer.span_context)
-        client.get("/tracing-route", headers={**parent_tracing_headers})
+    client.get("/tracing-route", headers=parent_tracing_headers)
 
-    assert len(mock_exporter.mock_calls) == 2
+    assert len(testing_exporter.exported) == 2
 
-    span_data = _extract_span_data_from_mock(mock_exporter, 1)
-    assert span_data.context.from_header
-    assert span_data.parent_span_id in parent_tracing_headers["traceparent"]
-    assert span_data.context.span_id in parent_tracing_headers["traceparent"]
-    assert span_data.context.trace_id in parent_tracing_headers["traceparent"]
+    span_data_with_parent = testing_exporter.exported[1]
+    assert span_data_with_parent.parent is not None
+    assert trace_id == format_trace_id(span_data_with_parent.context.trace_id)
 
 
 @pytest.mark.parametrize(
@@ -114,7 +137,7 @@ def test_ensure_parent_tracing_is_used(_setup_app_with_tracing_middleware):
     ],
 )
 def test_tracing_middleware(_setup_app_with_tracing_middleware, called_url, traced_url, expected_status_code):
-    client, mock_exporter = _setup_app_with_tracing_middleware
+    client, testing_exporter = _setup_app_with_tracing_middleware
     client.get(
         called_url,
         headers={
@@ -124,21 +147,19 @@ def test_tracing_middleware(_setup_app_with_tracing_middleware, called_url, trac
         },
     )
 
-    calls = mock_exporter.mock_calls[0]
-    method_called = calls[0]
+    assert len(testing_exporter.exported) == 1
 
-    span_data = _extract_span_data_from_mock(mock_exporter, 0)
-    assert method_called == "export"
+    span_data = testing_exporter.exported[0]
     assert span_data.name == called_url
 
     assert span_data.attributes.get(constants.CORRELATION_ID_HEADER_NAME) == "my-correlation-id"
     assert span_data.attributes.get(constants.PARTITION_ID_HEADER_NAME) == "my-partition-id"
     assert span_data.attributes.get(constants.REQUEST_ID_HEADER_NAME) == "my-request-id"
 
-    assert span_data.attributes.get(COMMON_ATTRIBUTES["HTTP_METHOD"]) == "GET"
-    assert span_data.attributes.get(COMMON_ATTRIBUTES["HTTP_ROUTE"]) == traced_url
-    assert span_data.attributes.get(COMMON_ATTRIBUTES["HTTP_URL"]) == f"http://testserver{called_url}"
-    assert span_data.attributes.get(COMMON_ATTRIBUTES["HTTP_STATUS_CODE"]) == expected_status_code
+    assert span_data.attributes.get(SpanAttributes.HTTP_METHOD) == "GET"
+    assert span_data.attributes.get(SpanAttributes.HTTP_ROUTE) == traced_url
+    assert span_data.attributes.get(SpanAttributes.HTTP_URL) == f"http://testserver{called_url}"
+    assert span_data.attributes.get(SpanAttributes.HTTP_STATUS_CODE) == expected_status_code
 
 
 def test_ctx_middleware_accessible_from_endpoints():
@@ -152,9 +173,7 @@ def test_ctx_middleware_accessible_from_endpoints():
     def route():
         request_ctx = get_context()
         assert request_ctx is not None
-
         assert request_ctx.logger is None
-        assert request_ctx.tracer is None
 
         raise CodeHasBeenReachedException("Endpoint called")
 
@@ -183,6 +202,16 @@ def test_ctx_middleware_with_logger():
         client.get("/ctx-route-test")
 
 
+def _init_tracing_provider():
+    """Extract code needed to initialize the tracing provider required to enable tracing"""
+    provider = trace.get_tracer_provider()
+    if not isinstance(provider, TracerProvider):
+        provider = TracerProvider()
+        trace.set_tracer_provider(provider)
+    exporter = ExporterInTest()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+
+
 @pytest.mark.parametrize(
     "middlewares_order,expected_exception,expected_exception_message",
     [
@@ -200,16 +229,22 @@ def test_ctx_middleware_with_logger():
         ),
         (
             [context_middleware, tracing_middleware],
+            CodeHasBeenReachedException,
+            "Endpoint called",
+        ),
+        ([], AssertionError, "context object is None"),
+        (
+            [context_middleware, logging_exception_middleware],
             AssertionError,
             # tracer is not available even tracing + context middleware create but not in the correct order
-            re.escape("tracer object should not be None\nassert None\n +  where None = ServiceContext().tracer"),
+            re.escape("logger object should not be None\nassert None\n +  where None = ServiceContext().logger"),
         ),
-        ([tracing_middleware], AssertionError, "context object is None"),
     ],
 )
 def test_ctx_middleware_with_tracer(middlewares_order, expected_exception, expected_exception_message):
     app = FastAPI()
-    app.state.traces_exporter = mock.Mock()
+
+    _init_tracing_provider()
 
     for middleware in middlewares_order:
         app.add_middleware(BaseHTTPMiddleware, dispatch=middleware)
@@ -221,10 +256,12 @@ def test_ctx_middleware_with_tracer(middlewares_order, expected_exception, expec
         request_ctx = get_context()
         assert request_ctx, "context object is None"
 
+        _span = trace.get_current_span()
         if tracing_middleware in middlewares_order:
-            assert request_ctx.tracer, "tracer object should not be None"
+            assert _span.get_span_context().is_valid is True
+            assert _span.name == "/ctx-route-test"
         else:
-            assert request_ctx.tracer is None
+            assert _span.get_span_context().is_valid is False
 
         if logging_exception_middleware in middlewares_order:
             assert request_ctx.logger, "logger object should not be None"

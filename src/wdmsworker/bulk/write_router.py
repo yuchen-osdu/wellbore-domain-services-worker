@@ -62,7 +62,7 @@ async def post_bulk_chunk_in_session_route(
         return await writer.write_bulk_data_in_session(
             storage, tenant, await request.body(), content_type, record_id, session_id, reference_curve=reference
         )
-    except exc.BulkValidationError as e:
+    except (exc.BulkValidationError, exc.BulkUnprocessableError) as e:
         get_logger().exception(f"validation error on write bulk for record {record_id}: {e}")
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
     except (exc.TooManyValuesError, exc.TooManyColumnsError) as e:

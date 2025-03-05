@@ -13,29 +13,19 @@
 # limitations under the License.
 
 from os import environ
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
 
 from .logger import init_logger
 from . import constants as azure_constants
 
 from osdu_az.storage.blob_storage_az import AzureAioBlobStorage
-from opencensus.ext.azure.trace_exporter import AzureExporter
+from opentelemetry.sdk.resources import Resource, SERVICE_NAME as SERVICE_NAME_ATTRIBUTE
 from osdu.core.api.storage.tenant import Tenant
 
-from ...constants import SERVICE_NAME, SERVICE_NAME_ENV_VAR
-
-
-def rename_cloud_role_func(service_name):
-    """
-    Return a processor function to change 'Cloud Role Name' in AppInsight with given service_name variable.
-    It's used by AzureLogHandler and AzureExporter.
-    https://docs.microsoft.com/en-us/azure/azure-monitor/app/api-filtering-sampling#opencensus-python-telemetry-processors
-    """
-
-    def callback_func(envelope):
-        envelope.tags["ai.cloud.role"] = service_name
-        return True
-
-    return callback_func
+from wdmsworker.constants import SERVICE_NAME, SERVICE_NAME_ENV_VAR
 
 
 def initialize_provider(app):
@@ -46,8 +36,15 @@ def initialize_provider(app):
     app.state.blob_storage = AzureAioBlobStorage()
     app.state.get_tenant = lambda dp: Tenant(data_partition_id=dp, project_id="", bucket_name="wdms-osdu")
 
-    az_ai_instrumentation_key = environ.get(azure_constants.AZ_AI_INSTRUMENTATION_KEY_ENV_VAR)
-    if az_ai_instrumentation_key:
-        traces_exporter = AzureExporter(connection_string=f"InstrumentationKey={az_ai_instrumentation_key}")
-        traces_exporter.add_telemetry_processor(rename_cloud_role_func(service_name))
-        app.state.traces_exporter = traces_exporter
+    resource = Resource(attributes={SERVICE_NAME_ATTRIBUTE: service_name})
+
+    provider = TracerProvider(resource=resource)
+
+    az_ai_instrumentation_str = environ.get(azure_constants.AZ_AI_CONNECTION_STR_ENV_VAR)
+    if az_ai_instrumentation_str:
+        exporter = AzureMonitorTraceExporter(connection_string=az_ai_instrumentation_str)
+        provider.add_span_processor(BatchSpanProcessor(exporter))
+
+    # Sets the global default tracer provider
+    trace.set_tracer_provider(provider)
+    return provider
