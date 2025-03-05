@@ -1,22 +1,21 @@
 variables:
-  CORE_SERVICE: wellbore-worker
-  CORE_INT_TEST_TYPE: python
-  CORE_SUPPORTED_PLATFORM: "linux/amd64"
+  CIMPL_SERVICE: wellbore-worker
+  CIMPL_INT_TEST_TYPE: python
+  CIMPL_SUPPORTED_PLATFORM: "linux/amd64"
 
-
-core-containerize-gitlab:
+cimpl-containerize-gitlab:
   needs: []
   variables:
-    CORE_BUILD_PATH: "./devops/core-plus/Dockerfile"
+    CIMPL_BUILD_PATH: "./devops/core-plus/Dockerfile"
 
-core-containerize-bootstrap-gitlab:
+cimpl-containerize-bootstrap-gitlab:
   needs: []
 
-core-deploy:
+cimpl-deploy:
   before_script:
     - echo "Deploying a new App version..."
 
-core-test-python:
+cimpl-test-python:
   rules:
     - exists:
         - never/existing/file.txt
