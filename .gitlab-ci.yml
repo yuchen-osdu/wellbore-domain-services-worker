@@ -56,8 +56,7 @@ aws-containerize:
   needs: []
 
 .default:
-  image: python:3.10-slim-bullseye
-  before_script:
+  script:
     - export PIP_EXTRA_INDEX_URL="https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple https://community.opengroup.org/api/v4/projects/148/packages/pypi/simple"
     - pip3 install -e ".[dev]"
     - pip3 install -e ".[aws]"
