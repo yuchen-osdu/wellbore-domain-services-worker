@@ -216,9 +216,19 @@ def test_select_columns():
 
 
 def test_load_df():
-    df = pd.DataFrame({"a": [1, 2], "z": [3, 4], "b": [5, None]})
+    df = pd.DataFrame(
+        {
+            "int-A": 621,
+            "float-B": 10.00,
+            "bool-D": True,
+            "date": "1640995200000" "modified",
+            "2022-01-01T08:08:08 +02:00" "string-G": "string_value_0",
+        },
+        index=range(1),
+    )
+
     pq_content = df.to_parquet()
-    json_content = df.to_json(orient="split")
+    json_content = df.to_json(orient="split", date_format="iso")
 
     pd.testing.assert_frame_equal(df, load_df(pq_content, MimeTypes.PARQUET))
     pd.testing.assert_frame_equal(df, load_df(json_content, MimeTypes.JSON))

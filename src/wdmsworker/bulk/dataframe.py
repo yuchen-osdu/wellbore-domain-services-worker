@@ -254,7 +254,14 @@ def load_df(file_like_data, content_type: MimeType) -> pd.DataFrame:
     if content_type == MimeTypes.PARQUET:
         return pd.read_parquet(file_like_data)
     elif content_type == MimeTypes.JSON:
-        return pd.read_json(path_or_buf=file_like_data, orient="split", convert_axes=False).replace("NaN", np.NaN)
+        return pd.read_json(
+            path_or_buf=file_like_data,
+            orient="split",
+            dtype=False,  # Ensure float are not cast to integer if X.00
+            convert_dates=True,  # Ensure date as string will be computed
+            keep_default_dates=True,  # Ensure columns with specified name will be computed as date.
+            convert_axes=False,
+        ).replace("NaN", np.NaN)
 
     raise ValueError(f"unsupported content_type {content_type}")
 

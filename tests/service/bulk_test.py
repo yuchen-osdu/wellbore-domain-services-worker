@@ -13,10 +13,11 @@
 # limitations under the License.
 
 import pytest
-
-from .generate_data import generate_df, assert_frame_equal
 from io import BytesIO
 import pandas as pd
+import json
+
+from .generate_data import generate_df, assert_frame_equal
 
 
 @pytest.mark.parametrize("ref_values", [list(range(3, 9)), [2.2, 1.0, -0.55]], ids=["increasing", "decreasing"])
@@ -249,3 +250,62 @@ def test_basic_compute_and_get_stats(test_client):
     assert get_stats_2_cols_response.status_code == 200
     stats_result_2_cols = get_stats_2_cols_response.json()
     assert sorted(stats_result_2_cols["data"].keys()) == ["MD", "floatC[0]", "floatC[1]"]
+
+
+def test_read_json_with_float_having_zero_decimal(test_client):
+    record_id = "my_record_id"
+    session_id = "my-session-123456"
+
+    # Chunk with float data with decimal .00
+    json_data_1 = json.dumps(
+        {
+            "columns": ["int-A", "float-B", "bool-D", "date", "modified", "string-G"],
+            "index": [0],
+            "data": [[621, 10.00, True, "1640995200000", "2022-01-01T08:08:08 +02:00", "string_value_0"]],
+        }
+    )
+
+    # Regular chunk
+    json_data_2 = json.dumps(
+        {
+            "columns": ["int-A", "float-B", "bool-D", "date", "modified", "string-G"],
+            "index": [1],
+            "data": [[126, 42.9895, False, "1640995204242", "2022-02-02T08:18:18 +02:00", "string_value_1"]],
+        }
+    )
+
+    # Sent chunks to service
+    for _chunk in [json_data_1, json_data_2]:
+        _add_session_data_response = test_client.post(
+            f"/data/{record_id}/session/{session_id}", data=_chunk, headers={"Content-Type": "application/json"}
+        )
+        assert _add_session_data_response.status_code == 200
+
+    # Complete session
+    complete_session_response = test_client.patch(
+        f"/data/{record_id}/session/{session_id}", params={"completion": "update"}
+    )
+    assert complete_session_response.status_code == 200, complete_session_response.text
+    response_data = complete_session_response.json()
+    bulk_id = response_data["bulkid"]
+
+    # Retrieve last version of the record with chunks above
+    get_record_data_response = test_client.get(f"/data/{record_id}/{bulk_id}")
+    assert get_record_data_response.status_code == 200, get_record_data_response.text
+
+    _result_df = pd.read_parquet(BytesIO(get_record_data_response.content))
+
+    expected_dtypes = pd.Series(
+        {
+            "int-A": "int64",
+            "float-B": "float64",
+            "bool-D": "bool",
+            "date": "datetime64[ns]",
+            "modified": "datetime64[ns, pytz.FixedOffset(120)]",
+            "string-G": "object",
+        }
+    )
+    # sort to get same order that _result_df dataframe.
+    expected_dtypes.sort_index(inplace=True)
+
+    pd.testing.assert_series_equal(_result_df.dtypes, expected_dtypes)
