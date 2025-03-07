@@ -96,11 +96,11 @@ spec:
         - configMapRef:
             name: {{ .Values.configMap.name }}{{ $nameSuffix }}
         env:
-        - name: AZ_AI_INSTRUMENTATION_KEY
+        - name: AZ_AI_CONNECTION_STR
           valueFrom:
             secretKeyRef:
               name: {{ .Values.deployment.instrumentationKey.secretName }}
-              key: appinsights
+              key: appinsights-connection-string
         - name: TENANT_ID
           valueFrom:
             secretKeyRef:

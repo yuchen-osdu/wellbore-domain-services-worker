@@ -63,11 +63,17 @@ def test_write_without_session(test_client, ref_values):
     assert_frame_equal(reference_df, actual_df, check_column_order=False)
 
 
-@pytest.mark.parametrize("ref_values", [[2.2, 1.0, 1.0, -0.55], [1, None, 3.3, 4.0]], ids=["duplicate", "missing"])
+@pytest.mark.parametrize(
+    "ref_values", [[2.2, 1.0, 1.0, -0.55], [1, None, 3.3, 4.0], []], ids=["duplicate", "missing", "no content"]
+)
 def test_write_without_session_invalid_cases(test_client, ref_values):
-    reference_df = generate_df(["floatB", "floatA[1]", "floatA[0]"], index=range(len(ref_values)))
-    reference_df["MD"] = ref_values
-    content = reference_df.to_parquet(index=True)
+
+    if ref_values:
+        reference_df = generate_df(["floatB", "floatA[1]", "floatA[0]"], index=range(len(ref_values)))
+        reference_df["MD"] = ref_values
+        content = reference_df.to_parquet(index=True)
+    else:
+        content = None
 
     # WHEN write
     response = test_client.post(
@@ -76,7 +82,10 @@ def test_write_without_session_invalid_cases(test_client, ref_values):
 
     # failure
     assert response.status_code == 422
-    assert "MD" in response.text
+    if content is None:
+        assert "either malformed or unsupported format" in response.text
+    else:
+        assert "MD" in response.text
 
 
 @pytest.mark.parametrize("ref_param", ({"reference": "MD"}, None))

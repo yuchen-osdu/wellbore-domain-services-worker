@@ -35,8 +35,9 @@ class RequestContextAdapter(logging.LoggerAdapter):
     """Enrich logger with request context by appending attributes after message logged"""
 
     def process(self, msg, kwargs):
-        my_context = self.extra["request_context"]
-        return "%s | %s" % (msg, my_context), kwargs
+        if my_context := self.extra.get("request_context", None):
+            return "%s | %s" % (msg, my_context), kwargs
+        return msg, kwargs
 
 
 def get_logger_from_request(request: Request):
@@ -52,5 +53,8 @@ def get_logger_from_request(request: Request):
     if request.headers.get(constants.PARTITION_ID_HEADER_NAME):
         request_context.setdefault("data-partition-id", request.headers[constants.PARTITION_ID_HEADER_NAME])
 
-    extra = {"request_context": request_context}
+    if len(request_context):
+        extra = {"request_context": request_context}
+    else:
+        extra = {}
     return RequestContextAdapter(get_logger(), extra=extra)
