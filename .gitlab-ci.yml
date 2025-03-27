@@ -42,7 +42,8 @@ include:
   - local: "devops/gc/pipeline/override-stages.yml"
 
   - project: "osdu/platform/ci-cd-pipelines"
-    file: "cloud-providers/core-global.yml"
+    file: "cloud-providers/cimpl-global.yml"
+
   - local: "devops/core-plus/pipeline/override-stages.yml"
 
   - project: "osdu/platform/ci-cd-pipelines"
@@ -54,9 +55,8 @@ include:
 aws-containerize:
   needs: []
 
-default:
-  image: python:3.10-slim-bullseye
-  before_script:
+.default:
+  script:
     - export PIP_EXTRA_INDEX_URL="https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple https://community.opengroup.org/api/v4/projects/148/packages/pypi/simple"
     - pip3 install -e ".[dev]"
     - pip3 install -e ".[aws]"
@@ -78,17 +78,21 @@ stages:
   - deploy_preship
 
 linters-check:
+  image: python:3.11-slim-bullseye
   tags: ["osdu-small"]
   stage: linting
   script:
+    - !reference [.default, script]
     - black . --check
     - flake8 ./src
     - mypy ./src
 
 unit-tests:
+  image: python:3.11-slim-bullseye
   tags: ["osdu-medium"]
   stage: testing
   script:
+    - !reference [.default, script]
     - coverage run -m pytest ./tests/unit --junitxml=report.xml
     - coverage report
     - coverage xml
@@ -102,9 +106,11 @@ unit-tests:
         path: coverage.xml
 
 service-tests:
+  image: python:3.11-slim-bullseye
   tags: ["osdu-medium"]
   stage: testing
   script:
+    - !reference [.default, script]
     - coverage run -m pytest ./tests/service --junitxml=report.xml
     - coverage report
     - coverage xml
