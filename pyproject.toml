@@ -97,7 +97,7 @@ baremetal = [
     "botocore",
     "requests",
     "osdu-api~=0.21.0rc",
-    "osdu-core-lib-python-baremetal==2.0.0"
+    "osdu-core-lib-python-baremetal==2.1.1"
 ]
 
 [tool.pytest.ini_options]
