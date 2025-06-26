@@ -3,7 +3,7 @@ import hashlib
 import asyncio
 import itertools
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Iterable, Iterator, Tuple
 
 from osdu.core.api.storage import exceptions as osdu_storage_exception
@@ -141,9 +141,7 @@ class BulkStatistics:
         """
 
         try:
-            computed_stats = bulk_df.describe(
-                datetime_is_numeric=True, percentiles=BulkStatistics._percentiles, exclude=[object, bool]
-            )
+            computed_stats = bulk_df.describe(percentiles=BulkStatistics._percentiles, exclude=[object, bool])
         except ValueError:
             # if input values cannot be processed because of excluded dtypes
             return pd.DataFrame()
@@ -242,13 +240,13 @@ class BulkStatistics:
             self._check_recomputation_allowed(internal_statistics_meta)
         except (osdu_storage_exception.ResourceNotFoundException, FileNotFoundError):
             public_meta = StatisticsComputationMeta(
-                computationStartDatetime=datetime.utcnow(),
+                computationStartDatetime=datetime.now(timezone.utc),
                 recordId=record_id,
                 recordVersion=record_version,
                 computationStatus=BulkStatisticsStatus.Started,
             )
             internal_statistics_meta = InternalStatisticsComputationMeta(
-                lastComputationDate=datetime.utcnow(), computationAttempt=1, meta=public_meta
+                lastComputationDate=datetime.now(timezone.utc), computationAttempt=1, meta=public_meta
             )
 
         await self._push_statistics_meta_file(bulk_statistics_path, internal_statistics_meta, overwrite_meta_file=True)
@@ -322,7 +320,7 @@ class BulkStatistics:
         """
 
         file_path = join(bulk_statistics_path, "statistics.json")
-        stats_meta_content = stats_meta_data.json(by_alias=True)
+        stats_meta_content = stats_meta_data.model_dump_json(by_alias=True)
 
         # todo: etag should be used here to avoid unwanted overwrite
         await self._storage.upload(self._tenant, file_path, stats_meta_content, overwrite=overwrite_meta_file)
@@ -334,7 +332,7 @@ class BulkStatistics:
 
         file_path = join(bulk_statistics_path, "statistics.json")
         blob_content = await self._storage.download(self._tenant, file_path)
-        return InternalStatisticsComputationMeta.parse_raw(blob_content)
+        return InternalStatisticsComputationMeta.model_validate_json(blob_content)
 
     async def get_bulk_statistics(
         self, record_id: str, bulk_uri: str, curves_selection: List[str] | None

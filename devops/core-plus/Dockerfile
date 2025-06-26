@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM python:3.10-slim-bullseye
+FROM python:3.13-slim-bullseye
 
 COPY pyproject.toml ./
 COPY README.md ./
@@ -31,4 +31,4 @@ RUN addgroup --system appuser && adduser --system appuser && adduser appuser app
 
 USER appuser
 
-CMD ["uvicorn", "wdmsworker.app:base", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "wdmsworker.app:app", "--host", "0.0.0.0", "--port", "8080"]

@@ -80,7 +80,7 @@ def start_wdms_worker_service(session_dir, no_sub_process_opt):
     with socket() as s:
         s.bind(("", 0))
         port = s.getsockname()[1]
-    r = subprocess.Popen(["uvicorn", "wdmsworker.app:base", "--host", "127.0.0.1", "--port", str(port)], env=srv_env)
+    r = subprocess.Popen(["uvicorn", "wdmsworker.app:app", "--host", "127.0.0.1", "--port", str(port)], env=srv_env)
 
     is_ready = False
     for _ in range(5):

@@ -16,7 +16,7 @@ from typing import List
 
 from fastapi import APIRouter, Depends, Query, HTTPException, status, Response
 
-from .filtering import BulkValueFilterOperator, ValueFilters, extract_bulk_filters
+from .filtering import ValueFilters, extract_bulk_filters
 from ..capture_timings import capture_timings
 from ..dependencies import (
     accept_dependency,
@@ -55,9 +55,7 @@ async def get_bulk_route(
     limit: int | None = Query(default=None, ge=1),
     curves: str | None = Query(default=None),
     describe: bool | None = Query(default=False),  # TODO add regex='...'
-    bulk_filter_query: List[str] | None = Query(
-        default=None, alias="filter", regex='^(".+"|[^:]+):(' + "|".join(BulkValueFilterOperator.values()) + "):.*$"
-    ),
+    bulk_filter_query: List[str] | None = Query(default=None, alias="filter"),
     accept_type: MimeType = Depends(accept_dependency),
     orient: JSONOrient = Depends(json_orient_dependency),
     storage=Depends(blob_storage_dependency),
@@ -77,15 +75,14 @@ async def get_bulk_route(
         curves = {curve.strip(): None for curve in curves.split(",") if curve}  # type: ignore
         if curves:
             curve_selection = list(dict.fromkeys(curves))
-
-    value_filters = ValueFilters(extract_bulk_filters(bulk_filter_query))
-
-    # if describe without filters, the catalog is enough to answer:
-    if catalog and describe and not value_filters.has_filter():
-        nb_rows, columns = catalog.describe(offset=offset, limit=limit, column_selection=curve_selection)
-        return _build_describe_response(nb_rows, columns)
-
     try:
+        value_filters = ValueFilters(extract_bulk_filters(bulk_filter_query))
+
+        # if describe without filters, the catalog is enough to answer:
+        if catalog and describe and not value_filters.has_filter():
+            nb_rows, columns = catalog.describe(offset=offset, limit=limit, column_selection=curve_selection)
+            return _build_describe_response(nb_rows, columns)
+
         if catalog is None:
             read_result = await reader.read_bulk_outside_session(
                 storage,
@@ -111,7 +108,7 @@ async def get_bulk_route(
     except errors.CurvesNotFoundError as e:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(e))
     except errors.LimitExceededError as e:
-        response_too_large = TooLargeReadErrorResponse.construct(message=e.message)
+        response_too_large = TooLargeReadErrorResponse.model_construct(message=e.message)
         if catalog is not None:
             response_too_large.set_bulk_description(
                 catalog.nb_rows, catalog.nb_columns, catalog.get_chunk_columns_slices()

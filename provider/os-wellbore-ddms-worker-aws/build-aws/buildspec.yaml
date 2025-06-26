@@ -28,7 +28,7 @@ phases:
   install:
     runtime-versions:
       java: corretto17
-      python: 3.11
+      python: 3.13
     commands:
       # fix error noted here: https://github.com/yarnpkg/yarn/issues/7866
       - curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | apt-key add -

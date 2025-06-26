@@ -1,4 +1,4 @@
-import io
+from io import BytesIO, StringIO
 from functools import reduce
 from itertools import product
 import uuid
@@ -65,7 +65,7 @@ def test_send_all_data_once(test_client, record_id: str, columns, content_type_h
         result_df = _cast_datetime_to_datetime64_ns(result_df)
 
     if content_type_header.endswith("json"):
-        initial_data_df = pd.read_json(data_to_send, orient="split")
+        initial_data_df = pd.read_json(StringIO(data_to_send), orient="split")
 
     assert_dataframe_equal(initial_data_df, result_df)
 
@@ -540,14 +540,14 @@ def test_session_update_previous_version_invalid_reference(test_client, record_i
 
 
 def _create_df_from_response(response) -> pd.DataFrame:
-    content = io.BytesIO(response.content)
+    content = BytesIO(response.content)
     content.seek(0)
 
     content_type = response.headers.get("content-type")
     if "parquet" in content_type:
         return pd.read_parquet(content)
     elif "json" in content_type:
-        return pd.read_json(path_or_buf=content, orient="split", convert_axes=False).replace("NaN", np.NaN)
+        return pd.read_json(path_or_buf=content, orient="split", convert_axes=False).replace("NaN", np.nan)
     else:
         raise ValueError(f"Unknown content-type: '{content_type}'")
 

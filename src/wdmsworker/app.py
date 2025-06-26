@@ -16,6 +16,7 @@ from os import environ
 from logging import getLogger
 
 from fastapi import FastAPI, Request
+from contextlib import asynccontextmanager
 
 
 from . import get_version
@@ -34,26 +35,15 @@ from .http_middlewares import (
 
 open_api_prefix = environ.get(constants.OPENAPI_PREFIX_ENV_VAR, constants.API_PREFIX)
 
-app = FastAPI(
-    title="Wellbore domain services worker",
-    version=get_version(),
-    root_path=open_api_prefix,
-)
 
-base = FastAPI()
-base.mount(open_api_prefix, app)
-
-add_middlewares_to_app(app)
+@asynccontextmanager
+async def worker_lifespan(worker_app: FastAPI):
+    startup_event(worker_app)
+    yield
+    shutdown_event(worker_app)
 
 
-@base.on_event("startup")
-async def base_startup_event():
-    # needed as FastAPI don't called mounted app startup_event by itself + TestClient compatibility
-    await on_startup_event()
-
-
-@app.on_event("startup")
-async def on_startup_event():
+def startup_event(worker_app: FastAPI):
     """
     Code hook for cloud provider specific code for:
         - storage access
@@ -61,22 +51,22 @@ async def on_startup_event():
     """
 
     provider = environ.get(constants.CLOUD_PROVIDER_ENV_VAR, "local")
-    initialize_for_provider(provider, app)
+    initialize_for_provider(provider, worker_app)
 
     logger = getLogger(constants.SERVICE_INTERNAL_NAME)
-    app.state.logger = logger
+    worker_app.state.logger = logger
     logger.info(f"startup DONE for provider {provider}")
 
 
-@base.on_event("shutdown")
-async def base_on_shutdown_event():
-    await on_shutdown_event()
+def shutdown_event(worker_app: FastAPI):
+    worker_app.state.logger.info("shutdown DONE")
 
 
-@app.on_event("shutdown")
-async def on_shutdown_event():
-    app.state.logger.info("shutdown DONE")
+app = FastAPI(
+    title="Wellbore domain services worker", version=get_version(), root_path=open_api_prefix, lifespan=worker_lifespan
+)
 
+add_middlewares_to_app(app)
 
 # ---------------------------------------------------------------
 # ---------------------------------------------------------------

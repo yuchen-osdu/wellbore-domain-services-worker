@@ -35,7 +35,7 @@ steps:
     pip install pytest-azurepipelines
   displayName: 'setup environment'
   env:
-    PIP_EXTRA_INDEX_URL: https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple
+    PIP_EXTRA_INDEX_URL: "https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple https://community.opengroup.org/api/v4/projects/148/packages/pypi/simple"
 
 - bash: |
     pytest -s --log-cli-level=INFO --junitxml=report_tests_unit.xml -o junit_suite_name=wdms_worker_ut_${{ parameters.python_version }} --cov=wdmsworker --cov-report=xml --cov-report=html --test-run-title='Worker unit tests' ./tests/unit

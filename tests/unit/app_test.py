@@ -15,8 +15,9 @@
 import os
 from unittest import mock
 import pytest
-from fastapi.testclient import TestClient
-from wdmsworker.app import base
+from asgi_lifespan import LifespanManager
+from httpx import AsyncClient, ASGITransport
+from wdmsworker.app import app
 from wdmsworker import constants
 
 
@@ -29,6 +30,15 @@ def mock_settings_env_vars(tmp_path):
         yield
 
 
-def test_app_can_be_mounted():
-    with TestClient(base) as client:
-        assert client.get(constants.API_PREFIX + "/healthz").status_code == 200
+@pytest.fixture(autouse=True)
+async def app_initialized_with_testclient(mock_settings_env_vars):
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test_wdms_worker") as client:
+            yield app, client
+
+
+@pytest.mark.anyio
+async def test_app_can_be_mounted(app_initialized_with_testclient):
+    _, client = app_initialized_with_testclient
+    response = await client.get(constants.API_PREFIX + "/healthz")
+    assert response.status_code == 200

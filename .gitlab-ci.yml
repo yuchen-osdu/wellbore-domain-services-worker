@@ -29,6 +29,8 @@ variables:
   AWS_SERVICE: wellbore-ddms-worker
   AWS_DEPLOY_TARGET: TF
 
+  PYTHON_IMAGE: "python:3.13-slim"
+
 include:
   - project: "osdu/platform/ci-cd-pipelines"
     file: "standard-setup.yml"
@@ -51,9 +53,6 @@ include:
 
   - project: "osdu/platform/ci-cd-pipelines"
     file: "cloud-providers/ibm-wellbore-bulk-worker.yml"
-
-aws-containerize:
-  needs: []
 
 .default:
   script:
@@ -78,7 +77,7 @@ stages:
   - deploy_preship
 
 linters-check:
-  image: python:3.11-slim-bullseye
+  image: $PYTHON_IMAGE
   tags: ["osdu-small"]
   stage: linting
   script:
@@ -88,7 +87,7 @@ linters-check:
     - mypy ./src
 
 unit-tests:
-  image: python:3.11-slim-bullseye
+  image: $PYTHON_IMAGE
   tags: ["osdu-medium"]
   stage: testing
   script:
@@ -106,7 +105,7 @@ unit-tests:
         path: coverage.xml
 
 service-tests:
-  image: python:3.11-slim-bullseye
+  image: $PYTHON_IMAGE
   tags: ["osdu-medium"]
   stage: testing
   script:
@@ -132,3 +131,16 @@ trusted-merge-branch-verification:
   image: $CI_REGISTRY/osdu/platform/trusted-mr-container
   before_script:
     - echo "overriding before script"
+
+aws-containerize:
+  needs: []
+  allow_failure: true
+
+aws-update-tf:
+  allow_failure: true
+
+gc-helm-charts-gitlab:
+  allow_failure: true
+
+ibm-deploy:
+  allow_failure: true

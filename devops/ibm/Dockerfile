@@ -1,6 +1,6 @@
 
 # FROM python:3.10-slim-bullseye
-FROM registry.access.redhat.com/ubi9/python-311
+FROM registry.access.redhat.com/ubi9/python-313
 
 WORKDIR /
 
@@ -22,4 +22,4 @@ ENV CLOUD_PROVIDER=ibm
 
 # Make the container run as non-root user
 USER 1001
-CMD ["uvicorn", "wdmsworker.app:base", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "wdmsworker.app:app", "--host", "0.0.0.0", "--port", "8080"]

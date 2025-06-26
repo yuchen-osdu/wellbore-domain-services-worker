@@ -30,7 +30,7 @@ def to_json_response(model: BaseModel, status_code: int = status.HTTP_200_OK) ->
     """
     return Response(
         status_code=status_code,
-        content=model.json(exclude_none=True),
+        content=model.model_dump_json(exclude_none=True),
         media_type=MimeTypes.JSON.type,
     )
 
@@ -94,7 +94,7 @@ class LimitExceededErrorResponse(BaseModel):
         message = "" if exclude_exception_message else str(ex)
         if additional_description:
             message = f"{additional_description}. {message}" if message else additional_description
-        return cls.construct(message=message, actual=ex.actual, limit=ex.limit)
+        return cls.model_construct(message=message, actual=ex.actual, limit=ex.limit)
 
 
 class ErrorWithTypeResponse(BaseModel):
