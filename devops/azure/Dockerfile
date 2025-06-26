@@ -12,14 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM python:3.10-slim-bullseye
+FROM python:3.13-slim-bullseye
 
 COPY pyproject.toml ./
 COPY README.md ./
 COPY LICENSE ./
 COPY ./src/wdmsworker ./src/wdmsworker
 
-ENV PIP_EXTRA_INDEX_URL=https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple
+ENV PIP_EXTRA_INDEX_URL="https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple https://community.opengroup.org/api/v4/projects/148/packages/pypi/simple"
 RUN pip install -v .[az]
 RUN rm -rf ./src/wdmsworker
 
@@ -31,4 +31,4 @@ RUN addgroup --system appuser && adduser --system appuser && adduser appuser app
 
 USER appuser
 
-CMD ["uvicorn", "wdmsworker.app:base", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "wdmsworker.app:app", "--host", "0.0.0.0", "--port", "8080"]

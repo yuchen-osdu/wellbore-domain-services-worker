@@ -118,7 +118,7 @@ async def post_bulk_data_route(
         get_logger().exception(f"exception at upload data to blob storage {e}")
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    return WriteBulkResponse.construct(bulkid=bulk_id, describe=bulk_description)
+    return WriteBulkResponse.model_construct(bulkid=bulk_id, describe=bulk_description)
 
 
 # TODO only supports overwrite commit mode for now
@@ -141,7 +141,7 @@ async def session_complete_route(
         bulk_id, bulk_description = await writer.complete_session(
             storage, tenant, record_id, session_id, completion, from_bulk, reference
         )
-        return WriteBulkResponse.construct(bulkid=bulk_id, describe=bulk_description)
+        return WriteBulkResponse.model_construct(bulkid=bulk_id, describe=bulk_description)
     except exc.TooManyConflictsToResolve as e:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, str(e))
     except exc.BulkCommitNoDataError as e:

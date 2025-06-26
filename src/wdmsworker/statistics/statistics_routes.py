@@ -167,7 +167,7 @@ async def get_bulk_statistics_version(
 
     # replace np.nan by string "NaN" to have unified str type values for std column
     if not stats_df.empty:
-        stats_df["std"].fillna(value=str("NaN"), inplace=True)
+        stats_df["std"] = stats_df["std"].fillna(value=str("NaN"))
 
     # only orient: 'index' or 'columns' can be read with pd.DataFrame.from_dict().
-    return BulkDataStatisticsResponse(**stats_meta.dict(by_alias=True), data=stats_df.to_dict(orient="index"))
+    return BulkDataStatisticsResponse(**stats_meta.model_dump(by_alias=True), data=stats_df.to_dict(orient="index"))

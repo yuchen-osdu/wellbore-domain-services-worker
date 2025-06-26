@@ -47,7 +47,7 @@ def test_compute_statistics_batch():
 
     computed_stats_df = stats_computer._compute_statistics_batch(bulk_df, bulk_catalog)
 
-    expected_stats_df = bulk_df.describe(datetime_is_numeric=True, percentiles=[0.10, 0.5, 0.90])
+    expected_stats_df = bulk_df.describe(percentiles=[0.10, 0.5, 0.90])
     expected_stats_df = expected_stats_df.astype("string").transpose()
     expected_stats_df["totalCount"] = str(values_count)
     expected_stats_df.rename(columns={"count": "nonAbsentValuesCount"}, inplace=True)

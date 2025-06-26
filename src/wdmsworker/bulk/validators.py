@@ -17,6 +17,7 @@ from dataclasses import dataclass
 import re
 
 import pandas as pd
+from pandas.core.dtypes.common import is_any_real_numeric_dtype
 
 from . import errors as exc
 from .constants import WRITE_MAX_COLUMNS_COUNT, WRITE_MAX_TOTAL_VALUES_COUNT
@@ -61,7 +62,7 @@ def validate_index(df: pd.DataFrame) -> ValidationResult:
     """Ensure index"""
     if len(df.index) == 0:
         return ValidationResult(False, "Empty data")
-    if not df.index.is_numeric() and not isinstance(df.index, pd.DatetimeIndex):
+    if not is_any_real_numeric_dtype(df.index) and not isinstance(df.index, pd.DatetimeIndex):
         return ValidationResult(False, "Index should be numeric or datetime")
     if not df.index.is_unique:
         return ValidationResult(False, "Duplicated index found")

@@ -267,7 +267,7 @@ async def complete_session(
         if ref_values_count != len(global_index):
             raise exc.BulkValidationError(
                 f"reference curve '{reference_curve}' do not cover the entire bulk,"
-                f" {len(global_index)-ref_values_count} values are missing."
+                f" {len(global_index) - ref_values_count} values are missing."
             )
 
         # build reference info

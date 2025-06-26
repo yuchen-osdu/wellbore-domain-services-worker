@@ -50,25 +50,27 @@ class BulkDataStatisticsResponse(StatisticsComputationMeta):
 
     data: Dict[str, CurveStatistics] = Field(
         title="Curves statistics' values",
-        example={
-            "CurveName": CurveStatistics(
-                **{
-                    "mean": "450.8438",
-                    "std": "318.27778186518816",
-                    "min": "-100.0",
-                    "10%": "9.0",
-                    "50%": "451.0",
-                    "90%": "893.0",
-                    "max": "999.0",
-                    "totalCount": "100000",
-                    "nonAbsentValuesCount": "100000.0",
-                }
-            )
-        },
+        examples=[
+            {
+                "CurveName": CurveStatistics(
+                    **{
+                        "mean": "450.8438",
+                        "std": "318.27778186518816",
+                        "min": "-100.0",
+                        "10%": "9.0",
+                        "50%": "451.0",
+                        "90%": "893.0",
+                        "max": "999.0",
+                        "totalCount": "100000",
+                        "nonAbsentValuesCount": "100000.0",
+                    }
+                )
+            }
+        ],
     )
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "computationStartDatetime": "2022-05-18T16:22:16.010582",
                 "recordId": "osdu:work-product-component--WellLog:6d9c95c972254bbbaeaecbfa67fd1cf3",

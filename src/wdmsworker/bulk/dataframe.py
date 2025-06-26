@@ -17,7 +17,7 @@
 import re
 from contextlib import suppress
 from typing import Iterable, Dict, List, Tuple, Optional, Set
-from io import BytesIO
+from io import BytesIO, StringIO
 from functools import partial
 
 from natsort import natsorted
@@ -250,6 +250,8 @@ def sort_dataframe_column(df: pd.DataFrame) -> pd.DataFrame:
 def load_df(file_like_data, content_type: MimeType) -> pd.DataFrame:
     if isinstance(file_like_data, bytes):
         file_like_data = BytesIO(file_like_data)
+    else:
+        file_like_data = StringIO(file_like_data)
 
     if content_type == MimeTypes.PARQUET:
         return pd.read_parquet(file_like_data)
@@ -261,7 +263,7 @@ def load_df(file_like_data, content_type: MimeType) -> pd.DataFrame:
             convert_dates=True,  # Ensure date as string will be computed
             keep_default_dates=True,  # Ensure columns with specified name will be computed as date.
             convert_axes=False,
-        ).replace("NaN", np.NaN)
+        ).replace("NaN", np.nan)
 
     raise ValueError(f"unsupported content_type {content_type}")
 

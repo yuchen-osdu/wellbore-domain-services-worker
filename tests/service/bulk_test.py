@@ -190,7 +190,7 @@ def test_write_without_session_invalid_index(test_client):
 
 def test_incorrect_filters_exception(test_client):
     reference_df = generate_df(["floatB", "floatC", "floatA"], index=range(6))
-    content = reference_df.to_parquet(index=True)
+    content = reference_df.to_parquet(engine="pyarrow")
 
     # WHEN write
     response = test_client.post("/data/my_record_id", data=content, headers={"Content-Type": "application/parquet"})
@@ -217,7 +217,7 @@ def test_incorrect_filters_exception(test_client):
         headers={"accept": "application/parquet"},
         params=unknown_operator_params,
     )
-    assert response.status_code == 422
+    assert response.status_code == 400
 
 
 def test_basic_compute_and_get_stats(test_client):
