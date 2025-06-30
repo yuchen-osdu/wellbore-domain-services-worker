@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM public.ecr.aws/docker/library/alpine:3.19.4 as build
+FROM public.ecr.aws/docker/library/python:3.13-alpine3.22 as build
 
 LABEL version="1.0"
 LABEL maintainer="aws"
@@ -24,8 +24,8 @@ RUN mkdir app
 RUN apk update
 RUN apk upgrade
 
-RUN apk add gcc musl-dev linux-headers libexpat=2.7.0-r0 perl=5.38.3-r1 python3-dev g++ bash build-base cmake jemalloc-dev boost-dev autoconf zlib-dev flex bison git tzdata lz4-dev
-RUN apk add py3-pip py3-pyarrow py3-numpy py3-six cython py3-pytest py3-cffi py3-cffi-pyc xz-libs=5.4.5-r1
+RUN apk add gcc musl-dev linux-headers libexpat perl python3-dev g++ bash build-base cmake jemalloc-dev boost-dev autoconf zlib-dev flex bison git tzdata lz4-dev
+RUN apk add py3-pip py3-pyarrow py3-numpy py3-six cython py3-pytest py3-cffi py3-cffi-pyc xz-libs
 
 RUN python3 -m venv "/app/.python/" --system-site-packages
 
@@ -44,7 +44,7 @@ RUN /app/.python/bin/pip install --no-cache-dir --upgrade -v .[aws]
 RUN apk del gcc musl-dev linux-headers python3-dev g++
 RUN apk --purge del apk-tools
 
-FROM public.ecr.aws/docker/library/alpine:3.19.4 as service
+FROM public.ecr.aws/docker/library/python:3.13-alpine3.22 as service
 
 RUN apk update
 RUN apk upgrade
