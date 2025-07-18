@@ -23,9 +23,7 @@ These packages are requisite for installation from a local computer:
 
 ## Installation
 
-Use any code editor to set variables in the **values.yaml** file. Some of the values are prefilled. However, you'll need to specify some values as well.
-
-Detailed information about these variables is provided below.
+You need to set variables in **values.yaml** file using any code editor. Some of the values are prefilled, but you need to specify some values as well. You can find more information about them below.
 
 ### Global Variables
 
@@ -33,8 +31,9 @@ Detailed information about these variables is provided below.
 |------|-------------|------|---------|----------|
 | **global.domain** | your domain for an external endpoint, ex `example.com` | string | `-` | yes |
 | **global.limitsEnabled** | whether CPU and memory limits are enabled | boolean | `true` | yes |
-| **global.tier** | Only PROD must be used to enable autoscaling | string | "" | no |
-| **global.autoscaling** | enables horizontal pod autoscaling, when tier=PROD | boolean | true | yes |
+| **global.tier** | tier defines the number of replicas for the service to ensure the service HA; values are `DEV`, `STAGE`, `PROD` | string | "" | no |
+| **global.autoscalingMode** | enables horizontal pod autoscaling on cluster spot nodes; values are `none`, `cpu`, `requests` | string | `cpu` | yes |
+| **global.logLevel** | severity of logging level | string | `ERROR` | yes |
 
 ### Configmap Variables
 
@@ -46,13 +45,14 @@ Detailed information about these variables is provided below.
 
 | Name | Description | Type | Default |Required |
 |------|-------------|------|---------|---------|
-| **data.requestsCpu** | amount of requested CPU | string | `5m` | yes |
+| **data.requestsCpu** | amount of requested CPU | string | `40m` | yes |
 | **data.requestsMemory** | amount of requested memory| string | `350Mi` | yes |
 | **data.limitsCpu** | CPU limit | string | `1` | only if `global.limitsEnabled` is true |
 | **data.limitsMemory** | memory limit | string | `1G` | only if `global.limitsEnabled` is true |
 | **data.gcImage** | Service image for GC env | string | `community.opengroup.org:5555/osdu/platform/domain-data-mgmt-services/wellbore/wellbore-domain-services-worker/gc-wellbore-worker-master:latest` | yes |
 | **data.imagePullPolicy** | when to pull image | string | `IfNotPresent` | yes |
 | **data.serviceAccountName** | k8s service account name for the application | string | `wellbore-worker` | yes |
+| **data.logLevel** | logging severity level for this service only | string | - | yes, only if differs from the `global.logLevel` |
 
 ### Config Variables
 
@@ -60,9 +60,8 @@ Detailed information about these variables is provided below.
 |------|-------------|------|---------|---------|
 | **conf.appName** | Service name | string | `wellbore-worker` | yes |
 | **conf.configmap** | configmap to be used | string | `wellbore-worker-config` | yes |
-| **conf.replicas** | Number of replicas for the application k8s deployment | digit | `2` | yes |
 
-### Horizontal Pod Autoscaling (HPA) variables (works only if tier=PROD and autoscaling=true)
+### Horizontal Pod Autoscaling (HPA) variables
 
 | Name | Description | Type | Default |Required |
 |------|-------------|------|---------|---------|
@@ -79,11 +78,50 @@ Detailed information about these variables is provided below.
 
 ### Limits variables
 
-| Name | Description | Type | Default |Required |
-|------|-------------|------|---------|---------|
-| **limits.maxTokens** | maximum number of requests per fillInterval | integer | 80 | only if `global.autoscaling` is true and `global.tier` is PROD |
-| **limits.tokensPerFill** | number of new tokens allowed every fillInterval | integer | 80 | only if `global.autoscaling` is true and `global.tier` is PROD |
-| **limits.fillInterval** | time interval | string | "1s" | only if `global.autoscaling` is true and `global.tier` is PROD |
+| Name                     | Description                                     | Type    | Default | Required                                       |
+|--------------------------|-------------------------------------------------|---------|---------|------------------------------------------------|
+| **limits.maxTokens**     | maximum number of requests per fillInterval     | integer | `12`    | only if `global.autoscalingMode` is `requests` |
+| **limits.tokensPerFill** | number of new tokens allowed every fillInterval | integer | `12`    | only if `global.autoscalingMode` is `requests` |
+| **limits.fillInterval**  | time interval                                   | string  | `"1s"`  | only if `global.autoscalingMode` is `requests` |
+
+### Autoscaling
+
+By default, autoscaling is configured for deployments targeting spot nodes. Pods will attempt to schedule on nodes with specific labels indicating they are spot instances. To adjust how pods are scheduled, you can update the `data.affinityLabelsSpot` in your values.yaml file.
+
+Example:
+
+```yml
+data:
+  affinityLabelsSpot:
+    mylabel:
+      - value1
+      - test
+    newLabel:
+      - newValue
+```
+
+Each label, along with its values, will be translated into a separate `- matchExpressions` block within the `nodeAffinity` section of your deployment. This configuration operates with OR logic, meaning pods will be scheduled on any node that possesses at least one of the specified labels with one of its defined values.
+
+The chart uses the `global.autoscalingMode` parameter in your `values.yaml` to control how autoscaling behaves. This parameter accepts three possible string values:
+
+* **cpu** (default): Autoscaling is enabled and is based on CPU utilization. This is the default setting.
+* **requests**: Autoscaling is enabled and is based on resource requests (custom metrics). **NOTE**: Prometheus should be installed in your cluster, custom metrics are used for this type of autoscaling.
+* **none**: Autoscaling is entirely disabled for the application. Setting `global.autoscalingMode` to **none** also prevents the creation of the spot deployment.
+
+The `global.tier` parameter controls the number of replicas based on the environment:
+
+* **DEV**: 1-5 replicas
+* **STAGE**: 2-7 replicas  
+* **PROD**: 3-10 replicas
+* **"" (empty)**: Uses `hpa.minReplicas` and `hpa.maxReplicas` values
+
+### Methodology for Parameter Calculation variables: **hpa.requests.targetValue**, **limits.maxTokens** and **limits.tokensPerFill**
+
+The parameters **hpa.requests.targetValue**, **limits.maxTokens** and **limits.tokensPerFill** were determined through empirical testing during load testing. These tests were conducted using the N2D machine series, which can run on either AMD EPYC Milan or AMD EPYC Rome processors. The values were fine-tuned to ensure optimal performance under typical workloads.
+
+### Recommendations for New Instance Types
+
+When changing the instance type to a newer generation, such as the C3D series, it is essential to conduct new load testing. This ensures the parameters are recalibrated to match the performance characteristics of the new processor architecture, optimizing resource utilization and maintaining application stability.
 
 ### Installing the Helm Chart
 

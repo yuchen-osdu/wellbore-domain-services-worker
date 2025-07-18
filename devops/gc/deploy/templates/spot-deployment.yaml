@@ -5,20 +5,39 @@ metadata:
     app: {{ .Values.conf.appName | quote }}
     type: ddms
     source: python
-  name: {{ .Values.conf.appName | quote }}
+  name: {{ printf "%s-spot" .Values.conf.appName | quote }}
   namespace: {{ .Release.Namespace | quote }}
 spec:
   selector:
     matchLabels:
       app: {{ .Values.conf.appName | quote }}
-  replicas: {{ .Values.conf.replicas }}
+      provision-type: "spot"
+  replicas: {{ include "wellboreWorker.minReplicasSpot" . }}
   template:
     metadata:
       labels:
         app: {{ .Values.conf.appName | quote }}
+        provision-type: "spot"
       annotations:
         rollme: {{ randAlphaNum 5 | quote }}
     spec:
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+{{- range $key, $valuesList := .Values.data.affinityLabelsSpot }}
+            - weight: 80
+              preference:
+                matchExpressions:
+                  - key: {{ $key }}
+                    operator: In
+                    values:
+{{ toYaml $valuesList | nindent 22 }}
+{{- end }}
+      tolerations:
+        - key: "kubernetes.io/arch"
+          operator: "Equal"
+          value: "arm64"
+          effect: "NoSchedule"
       containers:
         - name: {{ .Values.conf.appName | quote }}
           image: {{ .Values.data.gcImage | quote }}
@@ -37,19 +56,19 @@ spec:
               port: 8080
             periodSeconds: 60
           envFrom:
-          - configMapRef:
-              name: {{ .Values.conf.configmap | quote }}
+            - configMapRef:
+                name: {{ .Values.conf.configmap | quote }}
           ports:
             - containerPort: 8080
           resources:
             requests:
               cpu: {{ .Values.data.requestsCpu | quote }}
               memory: {{ .Values.data.requestsMemory | quote }}
-            {{- if .Values.global.limitsEnabled }}
+{{- if .Values.global.limitsEnabled }}
             limits:
               cpu: {{ .Values.data.limitsCpu | quote }}
               memory: {{ .Values.data.limitsMemory | quote }}
-            {{- end }}
+{{- end }}
       serviceAccountName: {{ .Values.data.serviceAccountName | quote }}
   strategy:
     type: RollingUpdate
