@@ -1,0 +1,57 @@
+#  Copyright 2025 Google LLC
+#  Copyright 2025 EPAM
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+{{- if (eq .Values.global.autoscalingMode "requests")}}
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ printf "%s-spot-requests-hpa" .Values.conf.appName | quote }}
+  namespace: {{ .Release.Namespace | quote }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ printf "%s-spot" .Values.conf.appName | quote }}
+  minReplicas: {{ include "wellboreWorker.minReplicasSpot" . }}
+  maxReplicas: {{ include "wellboreWorker.maxReplicasSpot" . }}
+  metrics:
+    - type: External
+      external:
+        metric:
+          name: istio.io|service|server|request_count
+          selector:
+            matchLabels:
+              metric.labels.destination_workload_name: {{ .Values.conf.appName | quote }}
+        target:
+          type: {{ .Values.hpa.requests.targetType | quote }}
+          {{- if eq .Values.hpa.requests.targetType "AverageValue" }}
+          averageValue: {{ .Values.hpa.requests.targetValue }}
+          {{- else if eq .Values.hpa.requests.targetType "Value" }}
+          value: {{ .Values.hpa.requests.targetValue }}
+          {{- end }}
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: {{ .Values.hpa.requests.scaleUpStabilizationWindowSeconds }}
+      policies:
+        - type: Percent
+          value: {{ .Values.hpa.requests.scaleUpValue }}
+          periodSeconds: {{ .Values.hpa.requests.scaleUpPeriod }}
+    scaleDown:
+      stabilizationWindowSeconds: {{ .Values.hpa.requests.scaleDownStabilizationWindowSeconds }}
+      policies:
+        - type: Percent
+          value: {{ .Values.hpa.requests.scaleDownValue }}
+          periodSeconds: {{ .Values.hpa.requests.scaleDownPeriod }}
+{{- end }}
