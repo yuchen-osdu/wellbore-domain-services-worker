@@ -39,7 +39,7 @@ COPY ./src/wdmsworker ./src/wdmsworker
 WORKDIR /
 ENV PIP_EXTRA_INDEX_URL="https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple https://community.opengroup.org/api/v4/projects/148/packages/pypi/simple"
 
-RUN /app/.python/bin/pip install setuptools==75.1.0
+RUN /app/.python/bin/pip install setuptools==78.1.1
 RUN /app/.python/bin/pip install --no-cache-dir --upgrade -v .[aws]
 RUN apk del gcc musl-dev linux-headers python3-dev g++
 RUN apk --purge del apk-tools
