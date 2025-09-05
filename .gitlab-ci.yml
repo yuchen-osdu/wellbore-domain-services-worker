@@ -29,6 +29,8 @@ variables:
   AWS_SERVICE: wellbore-ddms-worker
   AWS_DEPLOY_TARGET: TF
 
+  WDMS_WORKER_REGISTRY: 1384
+
   PYTHON_IMAGE: "python:3.13-slim"
 
 include:
@@ -144,3 +146,12 @@ gc-helm-charts-gitlab:
 
 ibm-deploy:
   allow_failure: true
+
+deploylib:
+  stage: deploy
+  script:
+    - python3 -m pip install --upgrade pip build twine
+    - python3 -m build
+    - TWINE_PASSWORD=${CI_JOB_TOKEN} TWINE_USERNAME=${CI_REGISTRY_USER} python -m twine upload --repository-url ${CI_API_V4_URL}/projects/${WDMS_WORKER_REGISTRY}/packages/pypi dist/*
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
