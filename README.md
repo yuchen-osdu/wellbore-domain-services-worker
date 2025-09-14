@@ -7,7 +7,7 @@ It is a single, containerized service written in Python that provides an interna
 
 ### Pre-requisites
 Set `PIP_EXTRA_INDEX_URL` environment variable to add extra url and feed from OSDU gitlab:
-> export PIP_EXTRA_INDEX_URL="https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple https://community.opengroup.org/api/v4/projects/148/packages/pypi/simple"
+> export PIP_EXTRA_INDEX_URL="https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple"
 
 Alternatively set it in `pip.conf` or `pip.ini`.
 

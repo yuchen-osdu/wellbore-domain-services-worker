@@ -29,8 +29,6 @@ variables:
   AWS_SERVICE: wellbore-ddms-worker
   AWS_DEPLOY_TARGET: TF
 
-  WDMS_WORKER_REGISTRY: 1384
-
   PYTHON_IMAGE: "python:3.13-slim"
 
 include:
@@ -56,11 +54,13 @@ include:
   - project: "osdu/platform/ci-cd-pipelines"
     file: "cloud-providers/ibm-wellbore-bulk-worker.yml"
 
+  - project: "osdu/platform/domain-data-mgmt-services/wellbore/lib/lib-registry"
+    file: "registry-setup.yml"
+
 .default:
   script:
-    - export PIP_EXTRA_INDEX_URL="https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple https://community.opengroup.org/api/v4/projects/148/packages/pypi/simple"
-    - pip3 install -e ".[dev]"
-    - pip3 install -e ".[aws]"
+    - export PIP_EXTRA_INDEX_URL="https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple"
+    - pip3 install -e ".[dev, aws]"
 
 stages:
   - linting
@@ -124,6 +124,19 @@ service-tests:
         coverage_format: cobertura
         path: coverage.xml
 
+deploylib:
+  image: $PYTHON_IMAGE
+  tags: ["osdu-medium"]
+  stage: deploy
+  allow_failure: true
+  script:
+    - python3 -m pip install --upgrade pip build twine
+    - python3 -m build
+    - TWINE_PASSWORD=${CI_JOB_TOKEN} TWINE_USERNAME=${CI_REGISTRY_USER} python -m twine upload --repository-url ${CI_API_V4_URL}/projects/${WDMS_LIB_REGISTRY}/packages/pypi dist/*
+  rules:
+    - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
+      when: on_success
+
 trigger-trusted-tests:
   image: $CI_REGISTRY/osdu/platform/trusted-mr-container
   before_script:
@@ -146,12 +159,3 @@ gc-helm-charts-gitlab:
 
 ibm-deploy:
   allow_failure: true
-
-deploylib:
-  stage: deploy
-  script:
-    - python3 -m pip install --upgrade pip build twine
-    - python3 -m build
-    - TWINE_PASSWORD=${CI_JOB_TOKEN} TWINE_USERNAME=${CI_REGISTRY_USER} python -m twine upload --repository-url ${CI_API_V4_URL}/projects/${WDMS_WORKER_REGISTRY}/packages/pypi dist/*
-  rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
