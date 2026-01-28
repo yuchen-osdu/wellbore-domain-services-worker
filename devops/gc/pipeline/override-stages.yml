@@ -43,6 +43,7 @@ gc-helm-charts-gitlab:
     - yq -e '.data | has("bmImage")' $GC_HELM_DEPLOYMENT_DIR/values.yaml &>/dev/null && BM_IMAGE="$CI_REGISTRY_IMAGE/$BM_IMAGE_NAME:$IMAGE_TAG" yq -i '.data.bmImage = env(BM_IMAGE)' $GC_HELM_DEPLOYMENT_DIR/values.yaml
     - cat $GC_HELM_DEPLOYMENT_DIR/values.yaml | grep -i image
 
+
 gc-helm-charts-release-gitlab:
   needs:
     - "gc-containerize-gitlab"
@@ -71,11 +72,6 @@ gc-deploy:
   before_script:
     - echo "Deploying a new App version..."
 
-gc-osdutest:
-  rules:
-    - exists:
-        - never/existing/file.txt
-
 gc-test-python:
   rules:
     - exists:
@@ -87,11 +83,6 @@ gc-dev2-deploy:
     - echo "Deploying a new App version..."
 
 gc-dev2-test-python:
-  rules:
-    - exists:
-        - never/existing/file.txt
-
-gc-dev2-osdutest:
   rules:
     - exists:
         - never/existing/file.txt
