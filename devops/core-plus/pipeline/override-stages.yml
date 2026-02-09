@@ -27,6 +27,6 @@ cimpl-dev2-deploy:
     - echo "Deploying a new App version..."
     
 cimpl-dev2-test-python:
-  image: python:3.11
-  variables:
-    CIMPL_WELLBORE_BASE_URL: https://osdu.dev2.osdu-cimpl.opengroup.org/api/os-wellbore-ddms
+  rules:
+    - exists:
+        - never/existing/file.txt
