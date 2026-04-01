@@ -91,3 +91,4 @@ authorizationPolicy:
 
 
 istioDnsHost: #{ISTIO_DNS_HOST}#
+trustedOrigins: #{AZURE_TRUSTED_ORIGINS}#

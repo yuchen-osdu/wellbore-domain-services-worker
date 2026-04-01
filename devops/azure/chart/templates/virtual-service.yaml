@@ -11,8 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+{{- define "originsRegex" }}^({{ range $index, $origin := . }}{{ if $index }}|{{ end }}{{ if contains "*" $origin }}{{ $origin | replace "*" "__WILDCARD__" | replace "." "\\." | replace "__WILDCARD__" ".*" }}{{ else }}{{ $origin | replace "." "\\." | replace "-" "\\-" }}{{ end }}{{ end }})${{ end }}
 {{- if .Values.istioDnsHost }}
+{{- $apiPrefix := include "os-wellbore-ddms.prefix" . }}
+{{- $origins := default (list) .Values.trustedOrigins }}
+{{- $trustedOriginsRegExp := include "originsRegex" $origins }}
+
 apiVersion: networking.istio.io/v1alpha3
 kind: VirtualService
 metadata:
@@ -23,10 +27,14 @@ metadata:
   name: {{ .Values.deployment.name }}{{ include "os-wellbore-ddms-worker.name-suffix" . }}
 {{ include "os-wellbore-ddms-worker.namespace" . | indent 2}}
 spec:
-  http:  
+  http:
+{{- if gt (len $origins) 0 }}
   - match:
     - uri:
-        prefix: '{{ include "os-wellbore-ddms-worker.prefix" . }}/'
+        prefix: '{{ $apiPrefix }}/'
+      headers:
+        origin:
+          regex: '{{ $trustedOriginsRegExp }}'
     route:
     - destination:
         host: {{ .Values.deployment.name }}{{ include "os-wellbore-ddms-worker.name-suffix" . }}
@@ -44,5 +52,46 @@ spec:
       - POST
       - GET
       allowOrigins:
-      - prefix: "*"
+{{- range $origins }}
+{{- if contains "*" . }}
+      - regex: '^{{ . | replace "*" "__WILDCARD__" | replace "." "\\." | replace "__WILDCARD__" ".*" }}$'
+{{- else }}
+      - exact: {{ . | quote }}
+{{- end }}
+{{- end }}
+  - match:
+    - uri:
+        prefix: '{{ $apiPrefix }}/'
+      headers:
+        origin:
+          regex: ".+"
+      withoutHeaders:
+        origin:
+          regex: '{{ $trustedOriginsRegExp }}'
+    directResponse:
+      status: 403
+      body:
+        string: CORS origin not allowed
+{{- end }}
+  - match:
+    - uri:
+        prefix: '{{ $apiPrefix }}/'
+    route:
+    - destination:
+        host: {{ .Values.deployment.name }}{{ include "os-wellbore-ddms-worker.name-suffix" . }}
+        port:
+          number: 80
+    corsPolicy:
+      maxAge: "60m"
+      allowCredentials: true
+      allowHeaders:
+      - Authorization
+      - Data-Partition-Id
+      - Correlation-Id
+      - Content-Type
+      allowMethods:
+      - POST
+      - GET
+      allowOrigins:
+          - prefix: "*"
 {{- end }}
