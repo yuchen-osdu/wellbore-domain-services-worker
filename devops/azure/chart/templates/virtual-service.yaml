@@ -13,7 +13,7 @@
 # limitations under the License.
 {{- define "originsRegex" }}^({{ range $index, $origin := . }}{{ if $index }}|{{ end }}{{ if contains "*" $origin }}{{ $origin | replace "*" "__WILDCARD__" | replace "." "\\." | replace "__WILDCARD__" ".*" }}{{ else }}{{ $origin | replace "." "\\." | replace "-" "\\-" }}{{ end }}{{ end }})${{ end }}
 {{- if .Values.istioDnsHost }}
-{{- $apiPrefix := include "os-wellbore-ddms.prefix" . }}
+{{- $apiPrefix := include "os-wellbore-ddms-worker.prefix" . }}
 {{- $origins := default (list) .Values.trustedOrigins }}
 {{- $trustedOriginsRegExp := include "originsRegex" $origins }}
 
