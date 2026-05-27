@@ -51,9 +51,6 @@ include:
   - project: "osdu/platform/ci-cd-pipelines"
     file: "cloud-providers/aws-global.yml"
 
-  - project: "osdu/platform/ci-cd-pipelines"
-    file: "cloud-providers/ibm-wellbore-bulk-worker.yml"
-
   - project: "osdu/platform/domain-data-mgmt-services/wellbore/lib/lib-registry"
     file: "registry-setup.yml"
 
@@ -157,5 +154,3 @@ aws-update-tf:
 gc-helm-charts-gitlab:
   allow_failure: true
 
-ibm-deploy:
-  allow_failure: true
