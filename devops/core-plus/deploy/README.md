@@ -58,7 +58,7 @@ Detailed information about these variables is provided below.
 |------|-------------|------|---------|---------|
 | **conf.appName** | Service name | string | `wellbore-worker` | yes |
 | **conf.configmap** | configmap to be used | string | `wellbore-worker-config` | yes |
-| **conf.minioSecretName** | MinIO secret name | string | `wellbore-minio-secret` | yes |
+|**conf.s3SecretName** | secret for S3/SeaweedFS storage(prefixed with `global.dataPartitionId`) | string | `wellbore-seaweedfs-secret` | yes |
 | **conf.replicas** | Number of replicas for the application k8s deployment | digit | `1` | yes |
 
 ### Installing the Helm Chart

@@ -43,18 +43,18 @@ spec:
             - name: S3_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.conf.minioSecretName | quote }}
-                  key: MINIO_ACCESS_KEY
+                  name: {{ printf "%s-%s" .Values.global.dataPartitionId .Values.conf.s3SecretName | quote }}
+                  key: {{ printf "SEAWEEDFS_ACCESS_KEY_%s" .Values.global.dataPartitionId | upper | quote }}
             - name: S3_SECRET_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.conf.minioSecretName | quote }}
-                  key: MINIO_SECRET_KEY
+                  name: {{ printf "%s-%s" .Values.global.dataPartitionId .Values.conf.s3SecretName | quote }}
+                  key: {{ printf "SEAWEEDFS_SECRET_KEY_%s" .Values.global.dataPartitionId | upper | quote }}
             - name: S3_ENDPOINT
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.conf.minioSecretName | quote }}
-                  key: MINIO_ENDPOINT
+                  name: {{ printf "%s-%s" .Values.global.dataPartitionId .Values.conf.s3SecretName | quote }}
+                  key: {{ printf "SEAWEEDFS_ENDPOINT_%s" .Values.global.dataPartitionId | upper | quote }}
           ports:
             - containerPort: 8080
           resources:
