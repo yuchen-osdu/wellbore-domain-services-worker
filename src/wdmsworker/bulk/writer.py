@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Module containing high level functions to write bulk data"""
+
 import uuid
 from enum import Enum
 from typing import Tuple, List

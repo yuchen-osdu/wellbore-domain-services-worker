@@ -16,6 +16,7 @@
 This module groups function related to bulk catalog.
 A catalog contains metadata of the chunks
 """
+
 import json
 from contextlib import suppress
 from dataclasses import dataclass

@@ -32,7 +32,7 @@ class BulkError(Exception):
         else:
             self.message = "unknown blob storage exception"
 
-        super().__init__(f'Bulk error: {self.message or "unknown"}')
+        super().__init__(f"Bulk error: {self.message or 'unknown'}")
 
 
 class BulkCaseNotSupportedError(BulkError):

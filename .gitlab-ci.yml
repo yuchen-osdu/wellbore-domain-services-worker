@@ -56,8 +56,11 @@ include:
 
 .default:
   script:
-    - export PIP_EXTRA_INDEX_URL="https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple"
-    - pip3 install -e ".[dev, aws]"
+    # uv.lock (resolved from pyproject.toml) is the source of truth. Install the
+    # locked dev + aws environment and activate it for the job's commands.
+    - python -m pip install --upgrade pip "uv==0.11.19"
+    - uv sync --locked --extra dev --extra aws
+    - . .venv/bin/activate
 
 stages:
   - linting
@@ -81,9 +84,30 @@ linters-check:
   stage: linting
   script:
     - !reference [.default, script]
-    - black . --check
-    - flake8 ./src
+    - ruff check ./src
+    - ruff format --check .
     - mypy ./src
+
+verify-uv-lock-and-requirements:
+  # Use a full image (not -slim) because this job needs `git` for the drift check.
+  image: python:3.13-bookworm
+  tags: ["osdu-small"]
+  stage: linting
+  script:
+    # uv.lock is the source of truth; requirements*.txt are generated exports.
+    - python -m pip install --upgrade pip "uv==0.11.19"
+    # fail if uv.lock is out of date with pyproject.toml
+    - uv lock --locked
+    # regenerate the exported requirements files from the lock
+    - ./scripts/regenerate-requirements.sh
+    # fail if the committed lock or exports drifted from what was regenerated
+    - git diff --exit-code uv.lock requirements.txt requirements_dev.txt
+  artifacts:
+    when: always
+    paths:
+      - "uv.lock"
+      - "requirements*.txt"
+    expire_in: 2 days
 
 unit-tests:
   image: $PYTHON_IMAGE

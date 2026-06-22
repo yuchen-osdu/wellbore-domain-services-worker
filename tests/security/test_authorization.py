@@ -38,6 +38,6 @@ def test_service_not_reachable_externally(
 
     response = requests.request("GET", url, headers=headers, verify=check_cert)
     assert response.status_code == expected_status_code, (
-        "Worker service should NOT be available from out of the " "cluster"
+        "Worker service should NOT be available from out of the cluster"
     )
     assert response.text in expected_response, f"Response '{response.text}' should contains '{expected_response}'"
