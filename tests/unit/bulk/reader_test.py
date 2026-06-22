@@ -81,7 +81,7 @@ class IndexType(str, Enum):
 def assert_describe_from_content(expected_df, response):
     assert response.mime_type == MimeTypes.JSON
     cols = str(list(expected_df.columns)).replace("'", '"')
-    expected_content = f"{'{'}\"numberOfRows\":{len(expected_df.index)}, \"columns\":{cols}{'}'}"
+    expected_content = f'{"{"}"numberOfRows":{len(expected_df.index)}, "columns":{cols}{"}"}'
     assert response.content == expected_content
 
 
@@ -610,7 +610,7 @@ async def test_single_chunk_case_array(
 
     bulk_filters = [BulkValueFilter(column="MD", operator=BulkValueFilterOperator.GreaterOrEqual, value="500")]
 
-    expected_df = reference_df[arrays_cols].loc[(reference_df["MD"] > 500)]
+    expected_df = reference_df[arrays_cols].loc[(reference_df["MD"] >= 500)]
     await assert_read_bulk(
         **common_kwargs,
         columns=["ARR"],
@@ -864,24 +864,27 @@ def split_bulk_into_chunk(method: str, index_type: IndexType = IndexType.Int):
 
     reference_df = generate_df(["A", "B", "C", "D", "E", "F[0]", "F[1]"], index=index)
     if method == "horizontal_and_vertical_split":
-        return reference_df, [  # first level split by curve A, B, C
-            [
-                # second split by rows
-                reference_df[["B", "C", "A"]].iloc[:9],
-                reference_df[["B", "C", "A"]].iloc[9:],
+        return (
+            reference_df,
+            [  # first level split by curve A, B, C
+                [
+                    # second split by rows
+                    reference_df[["B", "C", "A"]].iloc[:9],
+                    reference_df[["B", "C", "A"]].iloc[9:],
+                ],
+                # first level split by curve D, E
+                [
+                    # second split by rows
+                    reference_df[["E", "D"]].iloc[:6],
+                    reference_df[["E", "D"]].iloc[6:13],
+                    reference_df[["E", "D"]].iloc[13:],
+                ],
+                [
+                    reference_df[["F[0]", "F[1]"]].iloc[:9],
+                    reference_df[["F[0]", "F[1]"]].iloc[9:],
+                ],
             ],
-            # first level split by curve D, E
-            [
-                # second split by rows
-                reference_df[["E", "D"]].iloc[:6],
-                reference_df[["E", "D"]].iloc[6:13],
-                reference_df[["E", "D"]].iloc[13:],
-            ],
-            [
-                reference_df[["F[0]", "F[1]"]].iloc[:9],
-                reference_df[["F[0]", "F[1]"]].iloc[9:],
-            ],
-        ]
+        )
 
     if method == "horizontal_split":
         return reference_df, [

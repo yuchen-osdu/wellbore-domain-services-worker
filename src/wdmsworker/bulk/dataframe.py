@@ -150,7 +150,8 @@ def expand_columns(column_selection: ColumnSelection) -> List[str]:
         curve_name_slice, slice_start, slice_stop = match_full_slice_pattern(sel)
         if curve_name_slice:
             result.extend(
-                f"{curve_name_slice}[{i}]" for i in range(int(slice_start), int(slice_stop) + 1)  # type: ignore
+                f"{curve_name_slice}[{i}]"
+                for i in range(int(slice_start), int(slice_stop) + 1)  # type: ignore
             )
         else:
             result.append(sel)

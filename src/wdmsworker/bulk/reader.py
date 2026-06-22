@@ -436,7 +436,7 @@ def build_json_str_from_describe(nb_row: int, columns: List[str]) -> str:
     """for performance reason in case of many columns we build the response ourselve instead of using JSONRessponse"""
     columns_string = str(columns).replace("'", '"') if columns is not None else "null"
     nb_rows_str = f"{nb_row}" if nb_row is not None else "null"
-    return f"{'{'}\"numberOfRows\":{nb_rows_str}, \"columns\":{columns_string}{'}'}"
+    return f'{"{"}"numberOfRows":{nb_rows_str}, "columns":{columns_string}{"}"}'
 
 
 def _build_response_from_describe(nb_row: int, columns: List[str]) -> ReadResult:

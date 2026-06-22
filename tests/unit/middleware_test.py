@@ -301,9 +301,9 @@ def test_get_logger_fct():
         assert isinstance(get_logger(), RequestContextAdapter)
         assert get_logger() == get_context().logger, "withing a endpoint logger should be the enriched logger"
 
-        assert (
-            get_logger().extra["request_context"] == sent_headers
-        ), "enriched logger should store request's headers to log them"
+        assert get_logger().extra["request_context"] == sent_headers, (
+            "enriched logger should store request's headers to log them"
+        )
 
         raise CodeHasBeenReachedException("Endpoint called")
 

@@ -5,35 +5,44 @@ It is a single, containerized service written in Python that provides an interna
 
 # Install & run
 
-### Pre-requisites
-Set `PIP_EXTRA_INDEX_URL` environment variable to add extra url and feed from OSDU gitlab:
-> export PIP_EXTRA_INDEX_URL="https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple"
-
-Alternatively set it in `pip.conf` or `pip.ini`.
+Dependencies are managed with [uv](https://docs.astral.sh/uv/). `uv.lock`
+(resolved from `pyproject.toml`) is the source of truth; the checked-in
+`requirements.txt` / `requirements_dev.txt` are generated exports of that lock,
+kept for `pip install -r` compatibility. The private OSDU package index is
+configured in `pyproject.toml` (`[[tool.uv.index]]`), so no extra index URL has
+to be set when using uv.
 
 ### Local installation
 
-Install local in [“editable” mode](https://pip.pypa.io/en/stable/cli/pip_install/#cmdoption-e) (The files in the development directory are added to Python’s import path)
-> pip install -e .
+Create / refresh the `.venv` with the dev tooling installed:
+> uv sync --extra dev
+
+Then activate it:
+> source .venv/bin/activate
+
+(Plain pip still works if preferred:
+`pip install -e ".[dev]" --extra-index-url https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple`)
+
+### Updating dependencies
+
+Edit `pyproject.toml`, then refresh the lock and the exported requirements:
+> ./scripts/regenerate-requirements.sh
+
+The CI job `verify-uv-lock-and-requirements` enforces that `uv.lock` is current
+(`uv lock --locked`) and that the committed `requirements*.txt` match the lock.
 
 ### Run it
 
-Run service locally with auto reload:  
-> uvicorn wdmsworker.app:app --port 8080 --reload
+Run service locally with auto reload:
+> uv run uvicorn wdmsworker.app:app --port 8080 --reload
 
 # Test & contribute
 
-Install dependencies:
-* `[test]` for running tests only:
-> pip install -e ".[test]"
+Install dependencies (dev tooling: `pytest`, `ruff`, `mypy`, ...):
+> uv sync --extra dev
 
-* `[dev]` for contribution, it will install required dependencies, `[test]` ones and few others like `black`
-and `flake8`, so only the following is needed:
-> pip install -e ".[dev]"
-
-Update dependencies:
-
-> pip install -U -e ".[dev]"
+Update dependencies after editing `pyproject.toml`:
+> ./scripts/regenerate-requirements.sh
 
 
 ## Cloud provider code specific
@@ -70,7 +79,7 @@ pip install .[provider] --extra-index-url https://community.opengroup.org/api/v4
 
 ### Unit tests
 
-> pytest ./tests/unit
+> uv run pytest ./tests/unit
 
 ### Service tests
 Service tests are testing the service edge, meaning the rest APIs. There are two mode.  
@@ -101,10 +110,16 @@ See dedicated readme file [here](tests/security/readme.md).
 
 It requires `dev` dependencies.
 
-### PEP8 formatter
+### Formatter and linter (ruff)
 
-see [Black](https://black.readthedocs.io/en/stable/) documentation for more details. To format code, run command:
-> black .
+see [Ruff](https://docs.astral.sh/ruff/) documentation for more details.
+
+Format the code:
+> ruff format .
+
+Lint the code (and auto-fix where possible):
+> ruff check .
+> ruff check --fix .
 
 ### Static type checking
 
@@ -113,11 +128,6 @@ see [mypy](https://mypy.readthedocs.io/en/stable/) documentation for more detail
 
 _Note: [ignore_missing_imports](https://mypy.readthedocs.io/en/stable/config_file.html#confval-ignore_missing_imports)
 mypy configuration parameter is set to `True`._
-
-### Additional code checks using flake8
-
-see [flake8](https://flake8.pycqa.org/en/latest/) documentation for more details. run command:
-> flake8 ./src
 
 ### Automate above tools with Git pre-commit hook
 This setup needs to be done once.

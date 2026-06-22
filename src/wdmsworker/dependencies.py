@@ -33,7 +33,7 @@ async def data_partition_dependency(data_partition: str = Header(alias="data-par
 
 
 async def content_type_dependency(
-    content_type: str | None = Header(default=None, alias="Content-Type")
+    content_type: str | None = Header(default=None, alias="Content-Type"),
 ) -> MimeType | None:
     try:
         if content_type is not None:
@@ -53,7 +53,7 @@ async def accept_dependency(accept: str | None = Header(default=None, alias="Acc
 
 
 async def json_orient_dependency(
-    orient: JSONOrient = Query(JSONOrient.Split, description="format for JSON only.")
+    orient: JSONOrient = Query(JSONOrient.Split, description="format for JSON only."),
 ) -> JSONOrient:
     return orient
 

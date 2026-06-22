@@ -10,7 +10,7 @@ readme = "README.md"
 license = {file = "LICENSE"}
 keywords = ["python", "wdms", "bulk"]
 requires-python = ">=3.12"
-version = "0.2.1"
+version = "0.3.0"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Natural Language :: English",
@@ -29,8 +29,8 @@ dependencies = [
     "urllib3>=2.7.0",
     "httpcore",
     "uvicorn",
-    "opentelemetry-api==1.39.0",
-    "opentelemetry-sdk==1.39.0",
+    "opentelemetry-api==1.40.0",
+    "opentelemetry-sdk==1.40.0",
     "opentelemetry-semantic-conventions",
     "requests>=2.32.3",
     "osdu-core-lib-python==0.29.0",
@@ -54,17 +54,15 @@ dev = [
     "cryptography>=48.0.0",
     "tenacity>=9.1.2",
     "asgi_lifespan",
-    "black==25.1.0",  # formatting
+    "ruff",  # linting (ruff check) and formatting (ruff format)
     "mypy",  # typing check
-    "flake8",
-    "Flake8-pyproject",
-    "pre-commit", # for adding git pre-commit hook to run flake8, mypy and black automatically
+    "pre-commit", # for adding git pre-commit hook to run ruff and mypy automatically
     "types-requests", # for mypy support for requests
 ]
 
 # cloud provider specific dependencies
 az = [
-    "azure-monitor-opentelemetry-exporter",
+    "azure-monitor-opentelemetry-exporter>=1.0.0b46",
     "osdu-core-lib-python-azure==0.29.0",
     "aiohttp>=3.9.5",
     "msal>=1.24.1 "
@@ -110,46 +108,27 @@ markers = [
 [tool.mypy]
 ignore_missing_imports = "True"
 
-[tool.black]
+[tool.ruff]
 line-length = 120
-target-version = ['py313']
-# Preview allows to split long strings
-preview = true
-exclude = '''
-^/(
-  (
-      \.eggs         # exclude a few common directories in the
-    | \.git          # root of the project
-    | \.hg
-    | \.mypy_cache
-    | \.tox
-    | \.venv.*      # exclude all .venv
-    | venv.*        # exclude all venv
-    | \.idea
-    | \.pytest_cache
-    | \.hypothesis
-    | \.vscode
-    | _build
-    | buck-out
-    | build
-    | dist
-  )/
-)
-'''
+target-version = "py313"
+src = ["src"]
+extend-exclude = [".venv", "venv", "build", "dist", ".eggs"]
 
-[tool.flake8]
+[tool.ruff.lint]
+# Keep parity with the previous flake8 configuration.
 ignore = [
-    'E203',  # See https://github.com/PyCQA/pycodestyle/issues/373
-    'W503',  # W504 preferred
-    'E501',  # 120 chars instead of 79
+    "E203",  # whitespace before ':' - conflicts with the formatter
+    "E501",  # line length is enforced by the formatter (line-length = 120)
 ]
-per-file-ignores = [
-    '__init__.py:F401',  # disable unsued import file in __init__.py
-]
-max-line-length = 120
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]  # allow unused imports in package __init__.py
 
 [tool.uv]
-# You can add uv-specific configurations here if needed
+# Match pip's `--extra-index-url` merge behaviour: consider every configured
+# index and pick the best version, instead of uv's default "first-index" which
+# would pin older packages mirrored on the OSDU private index.
+index-strategy = "unsafe-best-match"
 
 [[tool.uv.index]]
 url = "https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple/"

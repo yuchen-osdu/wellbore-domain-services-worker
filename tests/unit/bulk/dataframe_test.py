@@ -221,8 +221,8 @@ def test_load_df():
             "int-A": 621,
             "float-B": 10.00,
             "bool-D": True,
-            "date": "1640995200000" "modified",
-            "2022-01-01T08:08:08 +02:00" "string-G": "string_value_0",
+            "date": "1640995200000modified",
+            "2022-01-01T08:08:08 +02:00string-G": "string_value_0",
         },
         index=range(1),
     )

@@ -33,7 +33,6 @@ PROJECT_CREDENTIALS_KEY = "OS_WELLBORE_DDMS_DATA_PROJECT_CREDENTIALS"
 
 
 class DataPartitionInfoGetterSync(DataPartitionInfoGetter):
-
     def get_partition_info(self, data_partition_id: str) -> DataPartitionInfo:
         if data_partition_info := self._cache.get(data_partition_id):
             return data_partition_info
