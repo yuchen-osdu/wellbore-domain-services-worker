@@ -2,6 +2,7 @@ variables:
   CIMPL_SERVICE: wellbore-worker
   CIMPL_INT_TEST_TYPE: python
   CIMPL_SUPPORTED_PLATFORM: "linux/amd64"
+  CIMPL_OPENAPI_YAML_ROUTE: "/api/wdms-worker/openapi.json"
 
 cimpl-containerize-gitlab:
   needs: []
