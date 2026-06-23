@@ -72,11 +72,6 @@ gc-deploy:
   before_script:
     - echo "Deploying a new App version..."
 
-gc-test-python:
-  rules:
-    - exists:
-        - never/existing/file.txt
-
 # PRESHIP
 gc-preship-deploy:
   before_script:
