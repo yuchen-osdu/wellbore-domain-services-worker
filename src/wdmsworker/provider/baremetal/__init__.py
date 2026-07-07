@@ -27,7 +27,7 @@ class DataPartitionInfoGetterSync(DataPartitionInfoGetter):
         if data_partition_info := self._cache.get(data_partition_id):
             return data_partition_info
 
-        data_partition_url = urljoin(self._partition_url, f"partitions/{data_partition_id}")
+        data_partition_url = urljoin(self._partition_host, f"partitions/{data_partition_id}")
         response = requests.get(data_partition_url)
         response.raise_for_status()
         data_partition_info = response.json()
