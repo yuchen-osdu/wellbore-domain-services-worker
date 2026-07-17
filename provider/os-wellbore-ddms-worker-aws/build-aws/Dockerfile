@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM public.ecr.aws/docker/library/python:3.13-alpine3.22 as build
+FROM public.ecr.aws/docker/library/python:3.13-alpine3.24 as build
 
 LABEL version="1.0"
 LABEL maintainer="aws"
@@ -44,7 +44,7 @@ RUN /app/.python/bin/pip install --no-cache-dir --upgrade -v .[aws]
 RUN apk del gcc musl-dev linux-headers python3-dev g++
 RUN apk --purge del apk-tools
 
-FROM public.ecr.aws/docker/library/python:3.13-alpine3.22 as service
+FROM public.ecr.aws/docker/library/python:3.13-alpine3.24 as service
 
 RUN apk update
 RUN apk upgrade
