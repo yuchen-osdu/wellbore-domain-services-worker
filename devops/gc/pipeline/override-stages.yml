@@ -25,7 +25,6 @@ gc-helm-charts-gitlab:
   variables:
     GIT_DEPTH: 20
     GC_IMAGE_NAME: gc-$GC_SERVICE
-    BM_IMAGE_NAME: bm-$GC_SERVICE
     IMAGE_TAG: $CI_COMMIT_SHORT_SHA
   before_script:
     - !reference [.commits_behind_main_check, script]
@@ -40,9 +39,7 @@ gc-helm-charts-gitlab:
       fi
     - wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq && chmod +x /usr/bin/yq
     - yq -e '.data | has("gcImage")' $GC_HELM_DEPLOYMENT_DIR/values.yaml &>/dev/null && GC_IMAGE="$CI_REGISTRY_IMAGE/$GC_IMAGE_NAME:$IMAGE_TAG" yq -i '.data.gcImage = env(GC_IMAGE)' $GC_HELM_DEPLOYMENT_DIR/values.yaml
-    - yq -e '.data | has("bmImage")' $GC_HELM_DEPLOYMENT_DIR/values.yaml &>/dev/null && BM_IMAGE="$CI_REGISTRY_IMAGE/$BM_IMAGE_NAME:$IMAGE_TAG" yq -i '.data.bmImage = env(BM_IMAGE)' $GC_HELM_DEPLOYMENT_DIR/values.yaml
     - cat $GC_HELM_DEPLOYMENT_DIR/values.yaml | grep -i image
-
 
 gc-helm-charts-release-gitlab:
   needs:
@@ -64,7 +61,12 @@ gc-helm-charts-release-gitlab:
       fi
     - wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq && chmod +x /usr/bin/yq
     - yq -e '.data | has("gcImage")' $GC_HELM_DEPLOYMENT_DIR/values.yaml &>/dev/null && GC_IMAGE="$CI_REGISTRY_IMAGE/$GC_IMAGE_NAME:$IMAGE_TAG" yq -i '.data.gcImage = env(GC_IMAGE)' $GC_HELM_DEPLOYMENT_DIR/values.yaml
-    - yq -e '.data | has("bmImage")' $GC_HELM_DEPLOYMENT_DIR/values.yaml &>/dev/null && BM_IMAGE="$CI_REGISTRY_IMAGE/$BM_IMAGE_NAME:$IMAGE_TAG" yq -i '.data.bmImage = env(BM_IMAGE)' $GC_HELM_DEPLOYMENT_DIR/values.yaml
+    - cat $GC_HELM_DEPLOYMENT_DIR/values.yaml | grep -i image
+
+.gc_substitute_gcr_image_in_helm:
+  script:
+    - wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq && chmod +x /usr/bin/yq
+    - yq -e '.data | has("gcImage")' $GC_HELM_DEPLOYMENT_DIR/values.yaml &>/dev/null && GC_IMAGE="$GC_GCR_REGISTRY/$GC_SERVICE/$IMAGE_NAME:$IMAGE_TAG" yq -i '.data.gcImage = env(GC_IMAGE)' $GC_HELM_DEPLOYMENT_DIR/values.yaml
     - cat $GC_HELM_DEPLOYMENT_DIR/values.yaml | grep -i image
 
 # COMMUNITY
