@@ -18,6 +18,8 @@ from wdmsworker.provider.aws import constants
 from os import environ
 from osdu_aws.storage.storage_aws import AwsStorage
 
+OTLP_ENDPOINT_ENV = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
+
 
 # @pytest.mark.unit
 def test_initialize_provider(test_tenant):
@@ -43,3 +45,52 @@ def test_initialize_provider(test_tenant):
                 tenant = mock_app.state.get_tenant("dp")
                 assert tenant.data_partition_id == test_tenant.data_partition_id
                 assert tenant.bucket_name.endswith("-logstore-osdu")
+
+
+def test_initialize_provider_wires_otlp_exporter_when_endpoint_set(test_tenant):
+    otlp_endpoint = "http://localhost:4318/v1/traces"
+    env = {
+        constants.AWS_REGION: "test-region",
+        constants.OSDU_INSTANCE_NAME: "test-instance",
+        OTLP_ENDPOINT_ENV: otlp_endpoint,
+    }
+    with patch.dict("os.environ", env):
+        with patch("osdu_aws.storage.storage_aws.AwsStorage"):
+            with patch("boto3.client"):
+                with (
+                    patch("wdmsworker.provider.aws.TracerProvider") as MockTracerProvider,
+                    patch("wdmsworker.provider.aws.BatchSpanProcessor") as MockBatchSpanProcessor,
+                    patch(
+                        "opentelemetry.exporter.otlp.proto.http.trace_exporter.OTLPSpanExporter"
+                    ) as MockOTLPSpanExporter,
+                ):
+                    mock_provider = MockTracerProvider.return_value
+
+                    returned = initialize_provider(MagicMock())
+
+                    MockOTLPSpanExporter.assert_called_once_with(endpoint=otlp_endpoint)
+                    MockBatchSpanProcessor.assert_called_once_with(MockOTLPSpanExporter.return_value)
+                    mock_provider.add_span_processor.assert_called_once_with(MockBatchSpanProcessor.return_value)
+                    assert returned is mock_provider
+
+
+def test_initialize_provider_skips_export_when_endpoint_unset(test_tenant):
+    env = {
+        constants.AWS_REGION: "test-region",
+        constants.OSDU_INSTANCE_NAME: "test-instance",
+    }
+    with patch.dict("os.environ", env, clear=False):
+        environ.pop(OTLP_ENDPOINT_ENV, None)
+        with patch("osdu_aws.storage.storage_aws.AwsStorage"):
+            with patch("boto3.client"):
+                with (
+                    patch("wdmsworker.provider.aws.TracerProvider") as MockTracerProvider,
+                    patch("wdmsworker.provider.aws.BatchSpanProcessor") as MockBatchSpanProcessor,
+                ):
+                    mock_provider = MockTracerProvider.return_value
+
+                    returned = initialize_provider(MagicMock())
+
+                    mock_provider.add_span_processor.assert_not_called()
+                    MockBatchSpanProcessor.assert_not_called()
+                    assert returned is mock_provider
