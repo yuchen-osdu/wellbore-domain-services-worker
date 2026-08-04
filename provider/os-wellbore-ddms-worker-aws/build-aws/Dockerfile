@@ -12,51 +12,45 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM public.ecr.aws/docker/library/python:3.13-alpine3.24 as build
+# wolfi-base is intentionally tracked at :latest to match the established EDI
+# Wolfi pattern (os-wellbore-ddms-aws). Trade-off: :latest is mutable, so image
+# builds are not byte-reproducible over time.
+FROM public.ecr.aws/chainguard/wolfi-base:latest as build
 
 LABEL version="1.0"
 LABEL maintainer="aws"
 
+ENV LANG=C.UTF-8
+ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PATH="/app/.python/bin:${PATH}"
 
-RUN mkdir app
-RUN apk update
-RUN apk upgrade
+ARG version=3.13
+RUN apk add python-${version} py${version}-pip --no-cache
 
-RUN apk add gcc musl-dev linux-headers libexpat perl python3-dev g++ bash build-base cmake jemalloc-dev boost-dev autoconf zlib-dev flex bison git tzdata lz4-dev
-RUN apk add py3-pip py3-pyarrow py3-numpy py3-six cython py3-pytest py3-cffi py3-cffi-pyc xz-libs
-
-RUN python3 -m venv "/app/.python/" --system-site-packages
+RUN python3 -m venv "/app/.python/"
 
 ARG PIP_INDEX_URL
+ENV PIP_EXTRA_INDEX_URL="https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple https://community.opengroup.org/api/v4/projects/148/packages/pypi/simple"
 
 COPY pyproject.toml ./
 COPY README.md ./
 COPY LICENSE ./
 COPY ./src/wdmsworker ./src/wdmsworker
 
-WORKDIR /
-ENV PIP_EXTRA_INDEX_URL="https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple https://community.opengroup.org/api/v4/projects/148/packages/pypi/simple"
+RUN /app/.python/bin/pip install pip==26.1.2 setuptools==78.1.1
+RUN /app/.python/bin/pip install --no-cache-dir --only-binary=:all: -v .[aws]
 
-RUN /app/.python/bin/pip install setuptools==78.1.1
-RUN /app/.python/bin/pip install --no-cache-dir --upgrade -v .[aws]
-RUN apk del gcc musl-dev linux-headers python3-dev g++
-RUN apk --purge del apk-tools
+FROM public.ecr.aws/chainguard/wolfi-base:latest as service
 
-FROM public.ecr.aws/docker/library/python:3.13-alpine3.24 as service
+LABEL version="1.0"
+LABEL maintainer="aws"
 
-RUN apk update
-RUN apk upgrade
+ARG version=3.13
+RUN apk add python-${version} bash openssl --no-cache
 
 COPY --from=build /app /app
 
-RUN apk add bash autoconf flex bison tzdata lz4
-RUN apk add py3-pip py3-pyarrow py3-numpy py3-six cython py3-pytest py3-cffi py3-cffi-pyc
-
-RUN addgroup -S -g 10001 appgroup \ 
- && adduser -S -H -u 10001 -G appgroup appuser
-
 ARG PIP_INDEX_URL
 
 COPY pyproject.toml ./
@@ -64,7 +58,10 @@ COPY README.md ./
 COPY LICENSE ./
 COPY ./src/wdmsworker ./src/wdmsworker
 
+ENV LANG=C.UTF-8
+ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV HOME=/tmp/app
 ENV PATH="/app/.python/bin:${PATH}"
 
 COPY provider/os-wellbore-ddms-worker-aws/build-aws/entrypoint.sh .
@@ -74,12 +71,14 @@ ENV PYTHONPATH=./src
 
 #Default to using self signed generated TLS cert
 ENV USE_SELF_SIGNED_SSL_CERT "true"
-ENV SSL_CERT_PATH "./aws/certs/cert.crt" 
+ENV SSL_CERT_PATH "./aws/certs/cert.crt"
 ENV SSL_KEY_PATH "./aws/certs/cert.key"
 ENV SSL_ENABLED "true"
 
-
 EXPOSE ${APPLICATION_PORT}
+
+RUN addgroup -S -g 10001 appgroup \
+ && adduser -S -H -u 10001 -G appgroup appuser
 
 USER 10001:10001
 ENTRYPOINT ["/bin/sh", "-c", "/entrypoint.sh"]
