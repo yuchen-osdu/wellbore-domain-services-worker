@@ -33,22 +33,27 @@ variables:
 
 include:
   - project: "osdu/platform/ci-cd-pipelines"
+    ref: release/0.30
     file: "standard-setup.yml"
 
   - project: "osdu/platform/ci-cd-pipelines"
+    ref: release/0.30
     file: "cloud-providers/azure.yml"
   - local: "/devops/azure/override-stages.yml"
 
   - project: "osdu/platform/ci-cd-pipelines"
+    ref: release/0.30
     file: "cloud-providers/gc-global.yml"
   - local: "devops/gc/pipeline/override-stages.yml"
 
   - project: "osdu/platform/ci-cd-pipelines"
+    ref: release/0.30
     file: "cloud-providers/cimpl-global.yml"
 
   - local: "devops/core-plus/pipeline/override-stages.yml"
 
   - project: "osdu/platform/ci-cd-pipelines"
+    ref: release/0.30
     file: "cloud-providers/aws-global.yml"
 
   - project: "osdu/platform/domain-data-mgmt-services/wellbore/lib/lib-registry"
