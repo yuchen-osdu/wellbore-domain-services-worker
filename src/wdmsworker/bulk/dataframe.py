@@ -286,7 +286,18 @@ def dump_df(df: pd.DataFrame, content_type: MimeType, orient: JSONOrient | None 
             return to_parquet_v0(df)
 
     if content_type == MimeTypes.JSON:
-        return df.fillna("NaN").to_json(orient=(orient or JSONOrient.Split).value, index=True, date_format="iso")
+        # pandas' ``to_json`` defaults ``double_precision`` to 10, which silently
+        # truncates float64 values that carry more than 10 digits after the decimal
+        # point (curve values are stored as float64 and stay bit-exact in Parquet,
+        # so the truncation only affects the JSON response). We raise the default
+        # to the pandas maximum of 15 so JSON responses preserve as much precision
+        # as pandas' JSON writer allows.
+        return df.fillna("NaN").to_json(
+            orient=(orient or JSONOrient.Split).value,
+            index=True,
+            date_format="iso",
+            double_precision=15,
+        )
 
     raise ValueError(f"unsupported content_type {content_type}")
 
