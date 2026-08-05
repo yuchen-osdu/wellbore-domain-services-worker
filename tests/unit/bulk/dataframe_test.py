@@ -58,6 +58,25 @@ def test_dump_json(columns):
     pd.testing.assert_frame_equal(ref_df, actual_df)
 
 
+# Regression: pandas' to_json defaults to double_precision=10, which silently
+# truncates float64 values with more than 10 digits after the decimal point.
+# dump_df must default to double_precision=15 (pandas maximum) so JSON responses
+# do not truncate stored curve values.
+@pytest.mark.parametrize(
+    "value",
+    [555.9800101010101, 10.910000000007, 23735.910000000007],
+)
+def test_dump_json_preserves_float_precision(value):
+    import json
+
+    df = pd.DataFrame({"GR": [value]}, index=[0])
+
+    result = dump_df(df, MimeTypes.JSON)
+
+    parsed = json.loads(result)
+    assert parsed["data"][0][0] == value
+
+
 def test_dump_invalid():
     with pytest.raises(ValueError):
         dump_df(generate_df([0], [0]), "invalid_mime")
