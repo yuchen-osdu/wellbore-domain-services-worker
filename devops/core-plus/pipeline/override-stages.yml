@@ -31,3 +31,15 @@ cimpl-dev2-test-python:
   rules:
     - exists:
         - never/existing/file.txt
+
+# OSDU MAIN Jobs
+
+cimpl-dev-test-python:
+  rules:
+    - exists:
+        - never/existing/file.txt
+
+cimpl-dev-backup-test-python:
+  rules:
+    - exists:
+        - never/existing/file.txt
