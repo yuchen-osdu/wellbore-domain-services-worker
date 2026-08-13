@@ -30,9 +30,7 @@ variables:
   AWS_DEPLOY_TARGET: TF
 
   PYTHON_IMAGE: "python:3.13-slim"
-  CIMPL_STACK: "1"
-  DEV: "1"
-  DEV_BACKUP: "1"
+
 include:
   - project: "osdu/platform/ci-cd-pipelines"
     file: "standard-setup.yml"
