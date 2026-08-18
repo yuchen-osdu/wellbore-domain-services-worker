@@ -4,12 +4,5 @@
 # reviewed by the engineering system rather than by service maintainers alone.
 # Template-sync never overwrites `.spi/**` or this file.
 #
-# TODO(spi): set the repository variable SPI_ENGINEERING_OWNERS to a GitHub team or
-# user that has access to this repository (for example "@my-org/engineering-system")
-# and re-run the "Settings Apply" workflow, or uncomment and edit the rule below.
-#
-# The rule stays commented out until a valid owner is configured: an unknown owner
-# makes the ruleset's require_code_owner_review silently ineffective.
-#
-# /.spi/ @<org>/<engineering-system-team>
+/.spi/ @yuchen-wang99
 # END spi-service-descriptor
