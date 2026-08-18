@@ -1,0 +1,111 @@
+name: 'Java Build'
+description: 'Reusable Java build action that handles build, test, and artifact upload'
+
+inputs:
+  generate_coverage:
+    description: 'Whether to generate coverage report'
+    required: false
+    default: 'false'
+  gitlab_token:
+    description: 'GitLab token for Maven authentication'
+    required: false
+  maven_profile:
+    description: 'Optional Maven profile(s) to restrict the build (e.g. core,azure — a comma-separated list is allowed). When empty, no -P is passed; validate.yml supplies the core,azure default (ADR-035).'
+    required: false
+
+outputs:
+  is_java_project:
+    description: "Whether this is a Java project"
+    value: ${{ steps.check_pom.outputs.has_pom }}
+  build_result:
+    description: "Result of the build process"
+    value: ${{ steps.build.outcome }}
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
+      with:
+        fetch-depth: 0  # Required for Sonar analysis
+
+    - name: "Check for pom.xml"
+      id: check_pom
+      shell: bash
+      run: |
+        if [ -f "pom.xml" ] || [ -n "$(find . -name 'pom.xml' -type f)" ]; then
+          echo "has_pom=true" >> $GITHUB_OUTPUT
+        else
+          echo "has_pom=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: "Setup Java Environment"
+      if: steps.check_pom.outputs.has_pom == 'true'
+      uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654  # v5
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: 'maven'
+        cache-dependency-path: '**/pom.xml'
+
+    - name: "Build and Test"
+      if: steps.check_pom.outputs.has_pom == 'true'
+      id: build
+      shell: bash
+      run: |
+        # Set up Maven CLI options.
+        # GITHUB_REF_NAME is "<n>/merge" on pull_request events; '/' is invalid in a Maven version.
+        SAFE_REF="${GITHUB_REF_NAME//\//-}"
+        MAVEN_CLI_OPTS="--batch-mode -Drevision=${SAFE_REF}-SNAPSHOT"
+        
+        # Add settings file if it exists
+        if [ -f ".mvn/community-maven.settings.xml" ]; then
+          MAVEN_CLI_OPTS="$MAVEN_CLI_OPTS --settings=.mvn/community-maven.settings.xml"
+        fi
+
+        # Restrict the build to the caller-supplied Maven profile(s) (ADR-035; comma-separated list allowed).
+        # Read from env (not direct interpolation) and validate the whole value (bash =~ anchors
+        # against the entire string, so an embedded newline cannot smuggle in a second option).
+        if [ -n "${MAVEN_PROFILE:-}" ]; then
+          if [[ ! "$MAVEN_PROFILE" =~ ^[A-Za-z0-9][A-Za-z0-9._,-]*$ ]]; then
+            echo "::error::Invalid maven_profile '${MAVEN_PROFILE}' (allowed characters: A-Z a-z 0-9 . _ , -)"
+            exit 1
+          fi
+          MAVEN_CLI_OPTS="$MAVEN_CLI_OPTS -P $MAVEN_PROFILE"
+        fi
+
+        if [[ "${{ inputs.generate_coverage }}" == "true" ]]; then
+          # Run build with coverage. Use `package` (not `test`) so the JARs are produced
+          # alongside coverage — the docker-build job downloads build-artifacts on PR events.
+          mvn $MAVEN_CLI_OPTS clean package org.jacoco:jacoco-maven-plugin:0.8.11:report
+          
+          python "${{ github.action_path }}/render_coverage_summary.py" \
+            --root . | tee -a "$GITHUB_STEP_SUMMARY"
+        else
+          # Regular build without coverage
+          mvn $MAVEN_CLI_OPTS clean install
+        fi
+      env:
+        MAVEN_OPTS: "-Dmaven.repo.local=$HOME/.m2/repository"
+        COMMUNITY_MAVEN_TOKEN: ${{ inputs.gitlab_token }}
+        MAVEN_PROFILE: ${{ inputs.maven_profile }}
+        # CRS Conversion requires this repository-local Apache SIS database for
+        # its core tests. Other services ignore the unused environment value.
+        SIS_DATA: ${{ github.workspace }}/apachesis_setup/SIS_DATA
+
+    - name: "Upload Build Artifacts"
+      if: steps.check_pom.outputs.has_pom == 'true'
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      with:
+        name: build-artifacts
+        path: |
+          **/target/*.jar
+          **/target/maven-*-output.txt
+        retention-days: 2
+
+    - name: "Upload Coverage Report"
+      if: steps.check_pom.outputs.has_pom == 'true' && inputs.generate_coverage == 'true'
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      with:
+        name: coverage-report
+        path: '**/target/site/jacoco/'
+        retention-days: 2 
