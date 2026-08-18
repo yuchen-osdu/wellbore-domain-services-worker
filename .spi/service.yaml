@@ -22,6 +22,7 @@ build:
     compatibilityVersions: ["3.13"]
     distribution: osdu-wbddms-worker
     importPackage: wdmsworker
+    # Upstream unit tests import AWS provider modules, so CI installs the locked aws extra.
     testExtras: [dev, aws]
     runtimeExtras: [az]
 
