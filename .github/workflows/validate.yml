@@ -434,6 +434,14 @@ jobs:
     outputs:
       is_python_project: ${{ steps.build.outputs.is_python_project }}
       build_result: ${{ steps.build.outputs.build_result }}
+      compatibility_matrix: ${{ steps.lane.outputs.compatibility_matrix }}
+      distribution_name: ${{ steps.lane.outputs.distribution_name }}
+      import_package: ${{ steps.lane.outputs.import_package }}
+      test_extras: ${{ steps.lane.outputs.test_extras }}
+      runtime_extras: ${{ steps.lane.outputs.runtime_extras }}
+      unit_test_path: ${{ steps.lane.outputs.unit_test_path }}
+      service_in_process_test_path: ${{ steps.lane.outputs.service_in_process_test_path }}
+      service_subprocess_test_path: ${{ steps.lane.outputs.service_subprocess_test_path }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
         with:
@@ -463,6 +471,30 @@ jobs:
           fi
           echo "✅ Local actions restored - validation can proceed"
 
+      - name: "Publish Python Lane Contract"
+        id: lane
+        shell: bash
+        run: |
+          {
+            echo "compatibility_matrix=${COMPATIBILITY_MATRIX}"
+            echo "distribution_name=${DISTRIBUTION_NAME}"
+            echo "import_package=${IMPORT_PACKAGE}"
+            echo "test_extras=${TEST_EXTRAS}"
+            echo "runtime_extras=${RUNTIME_EXTRAS}"
+            echo "unit_test_path=${UNIT_TEST_PATH}"
+            echo "service_in_process_test_path=${SERVICE_IN_PROCESS_TEST_PATH}"
+            echo "service_subprocess_test_path=${SERVICE_SUBPROCESS_TEST_PATH}"
+          } >> "$GITHUB_OUTPUT"
+        env:
+          COMPATIBILITY_MATRIX: ${{ needs.read-service-config.outputs.python_compatibility_matrix }}
+          DISTRIBUTION_NAME: ${{ needs.read-service-config.outputs.python_distribution }}
+          IMPORT_PACKAGE: ${{ needs.read-service-config.outputs.python_import_package }}
+          TEST_EXTRAS: ${{ needs.read-service-config.outputs.python_test_extras }}
+          RUNTIME_EXTRAS: ${{ needs.read-service-config.outputs.python_runtime_extras }}
+          UNIT_TEST_PATH: ${{ needs.read-service-config.outputs.python_unit_test_path }}
+          SERVICE_IN_PROCESS_TEST_PATH: ${{ needs.read-service-config.outputs.python_service_in_process_test_path }}
+          SERVICE_SUBPROCESS_TEST_PATH: ${{ needs.read-service-config.outputs.python_service_subprocess_test_path }}
+
       - name: "Run Python Build"
         id: build
         uses: ./.github/actions/python-build
@@ -481,16 +513,12 @@ jobs:
 
   python-compatibility:
     name: "🐍 Python Compatibility"
-    needs: [check-initialization, check-repo-state, check-paths, read-service-config, python-build]
-    if: |
-      needs.check-repo-state.outputs.is_initialized == 'true' &&
-      needs.read-service-config.outputs.build_lane == 'python' &&
-      needs.check-paths.outputs.should_run == 'true' &&
-      github.actor != 'dependabot[bot]'
+    needs: [python-build]
+    if: needs.python-build.result == 'success'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.read-service-config.outputs.python_compatibility_matrix) }}
+      matrix: ${{ fromJSON(needs.python-build.outputs.compatibility_matrix) }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
         with:
@@ -523,13 +551,13 @@ jobs:
         uses: ./.github/actions/python-build
         with:
           python_version: ${{ matrix.version }}
-          package_name: ${{ needs.read-service-config.outputs.python_import_package }}
-          distribution_name: ${{ needs.read-service-config.outputs.python_distribution }}
-          test_extras: ${{ needs.read-service-config.outputs.python_test_extras }}
-          runtime_extras: ${{ needs.read-service-config.outputs.python_runtime_extras }}
-          unit_test_path: ${{ needs.read-service-config.outputs.python_unit_test_path }}
-          service_in_process_test_path: ${{ needs.read-service-config.outputs.python_service_in_process_test_path }}
-          service_subprocess_test_path: ${{ needs.read-service-config.outputs.python_service_subprocess_test_path }}
+          package_name: ${{ needs.python-build.outputs.import_package }}
+          distribution_name: ${{ needs.python-build.outputs.distribution_name }}
+          test_extras: ${{ needs.python-build.outputs.test_extras }}
+          runtime_extras: ${{ needs.python-build.outputs.runtime_extras }}
+          unit_test_path: ${{ needs.python-build.outputs.unit_test_path }}
+          service_in_process_test_path: ${{ needs.python-build.outputs.service_in_process_test_path }}
+          service_subprocess_test_path: ${{ needs.python-build.outputs.service_subprocess_test_path }}
           generate_coverage: 'false'
           artifact_suffix: ${{ matrix.artifact_suffix }}
 
