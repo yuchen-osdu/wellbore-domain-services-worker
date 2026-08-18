@@ -1,0 +1,534 @@
+# Run a service's acceptance-test suite against the live spi-stack gateway, after
+# verifying the pod still runs the digest we just deployed.
+#
+# CALLER REQUIREMENTS (composite actions cannot declare permissions or install tools):
+#   - The calling workflow job MUST set `permissions: { id-token: write, contents: read }`.
+#   - The caller MUST supply Azure credentials as the `azure_*` inputs. This action performs
+#     its own `azure/login` and `az aks get-credentials`, so it works in a job separate from
+#     deploy; no prior login is required.
+#   - kubectl, kubelogin, Java 17, and Maven must be available on the runner.
+#
+# ENCAPSULATION: this action takes only explicit inputs. It never reads vars.* or secrets.*
+# directly -- the workflow caller wires them in (§5.3).
+#
+# EXIT-CODE SEMANTICS (required-check compatible, §5.3): the job exit is binary on the TEST
+# outcome only. The cross-service health probe is advisory -- it sets cluster_state +
+# test_result=pass-advisory and drives a PR label, but NEVER changes the exit code.
+#
+# Reference: design doc §5.3 + Appendix A.4 + §8.6 + §8.9.
+
+name: 'Integration Test (acceptance suite vs gateway)'
+description: >-
+  Verify the deployed digest is still running, run an advisory cross-service health probe,
+  pull acceptance-test secrets from Key Vault (masked), mint entitled and no-data-access
+  federated tokens, and run the service's acceptance-test Maven module against the gateway
+  with retry-on-flake.
+
+inputs:
+  azure_client_id:
+    description: 'Federated-identity client ID for OIDC login (repo secret AZURE_CLIENT_ID).'
+    required: true
+  azure_tenant_id:
+    description: 'Entra tenant ID (repo secret AZURE_TENANT_ID).'
+    required: true
+  azure_subscription_id:
+    description: 'Subscription ID (repo secret AZURE_SUBSCRIPTION_ID).'
+    required: true
+  aks_resource_group:
+    description: 'Resource group of the AKS cluster (org variable AKS_RESOURCE_GROUP).'
+    required: true
+  aks_cluster_name:
+    description: 'AKS cluster name (org variable AKS_CLUSTER_NAME).'
+    required: true
+  test_dir:
+    description: 'Acceptance-test Maven module directory (per-service variable ACCEPTANCE_TEST_DIR; convention <service>-acceptance-test).'
+    required: true
+  namespace:
+    description: 'Target namespace (org variable K8S_NAMESPACE, e.g. osdu).'
+    required: true
+  deployment_name:
+    description: 'Deployment under test (per-service variable K8S_DEPLOYMENT_NAME).'
+    required: true
+  container_name:
+    description: 'Container within the Deployment (per-service variable K8S_CONTAINER_NAME).'
+    required: true
+  gateway_url:
+    description: 'Base gateway URL, e.g. https://<gateway-host> (org variable GATEWAY_URL).'
+    required: true
+  keyvault_name:
+    description: 'Key Vault holding acceptance-test secrets (org variable KEYVAULT_NAME).'
+    required: true
+  secret_map:
+    description: 'JSON map of env-var-name -> kv-secret-name, e.g. {"INTEGRATION_TESTER":"integration-tester-id"}. Per-service. Empty {} when the suite needs no KV secrets (e.g. a service that authorizes any AAD service-principal token).'
+    required: false
+    default: '{}'
+  aad_client_id:
+    description: >-
+      Optional Entra app id to mint an app-only ROOT_USER_TOKEN for (org/service variable AAD_CLIENT_ID).
+      When set, the action runs `az account get-access-token --resource <aad_client_id>` AS THE CI federated
+      identity (no secret -- the GitHub-Actions port of ADME's GenerateTokenWithoutSecret.yml) and exports the
+      raw token as the env var named by root_token_env (default ROOT_USER_TOKEN), masked. OSDU acceptance suites
+      (TestTokenUtils) consume that token directly and skip the client_credentials OIDC flow. Leave empty to use
+      the suite's own OIDC flow via secret_map instead.
+    required: false
+    default: ''
+  no_data_access_client_id:
+    description: >-
+      Client ID of the shared no-entitlements UAMI created by spi onboard for services that opt in
+      to negative-authorization tests. Used only when no_data_access_token_env is set.
+    required: false
+    default: ''
+  no_data_access_token_env:
+    description: >-
+      Env var that receives the short-lived no-data-access bearer token. Empty disables the second
+      token exchange. Most services use NO_DATA_ACCESS_TESTER_ACCESS_TOKEN; Workflow uses
+      NO_ACCESS_USER_TOKEN.
+    required: false
+    default: ''
+  root_token_env:
+    description: 'Env var name the acceptance suite reads a pre-minted bearer token from (raw, no "Bearer " prefix; the suite adds it). Only used when aad_client_id is set.'
+    required: false
+    default: 'ROOT_USER_TOKEN'
+  env_map:
+    description: 'Optional JSON map of NON-SECRET env-var-name -> literal value to export to the test run, e.g. {"PARTITION_BASE_URL":"https://gw/","MY_TENANT":"opendes"}. Per-service; never logged-masked (use secret_map for secrets).'
+    required: false
+    default: '{}'
+  expected_digest:
+    description: 'sha256 digest the deploy job set (needs.deploy.outputs.deployed_digest). The pod image is re-read and the run fails on mismatch (mid-test Flux resume / stale restart guard).'
+    required: true
+  dependencies:
+    description: 'Optional JSON map of dependency-service -> gateway health path, e.g. {"partition":"/api/partition/v1/info"}. Probed at start; advisory only (drives cluster_state + PR label, never the exit code).'
+    required: false
+    default: '{}'
+  maven_goal:
+    description: 'Maven goal for the acceptance tests.'
+    required: false
+    default: 'verify'
+  maven_profile:
+    description: 'Optional Maven profile for the acceptance-test module.'
+    required: false
+    default: ''
+  max_attempts:
+    description: 'Acceptance-test retry attempts (flaky-test mitigation, §8.6).'
+    required: false
+    default: '2'
+  timeout_minutes:
+    description: 'Per-attempt timeout for the acceptance-test run.'
+    required: false
+    default: '10'
+
+outputs:
+  test_result:
+    description: "'pass' | 'fail' | 'pass-advisory' (tests passed but a dependency was unhealthy at probe time)."
+    value: ${{ steps.result.outputs.test_result }}
+  cluster_state:
+    description: "'healthy' | 'contaminated' (cross-service health probe at start of run)."
+    value: ${{ steps.health.outputs.cluster_state }}
+  test_report_url:
+    description: 'Link to the uploaded JUnit XML artifact (empty if none produced).'
+    value: ${{ steps.report.outputs.artifact-url }}
+  tests:
+    description: 'Number of tests reported by Surefire/Failsafe XML.'
+    value: ${{ steps.junit.outputs.tests }}
+  failures:
+    description: 'Number of JUnit assertion failures.'
+    value: ${{ steps.junit.outputs.failures }}
+  errors:
+    description: 'Number of JUnit execution errors.'
+    value: ${{ steps.junit.outputs.errors }}
+  skipped:
+    description: 'Number of skipped or disabled tests.'
+    value: ${{ steps.junit.outputs.skipped }}
+  attempts:
+    description: 'Number of retry-wrapper attempts used.'
+    value: ${{ steps.tests.outputs.total_attempts }}
+
+runs:
+  using: composite
+  steps:
+    - name: 'Azure login (OIDC)'
+      uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43  # v3.0.0
+      with:
+        client-id: ${{ inputs.azure_client_id }}
+        tenant-id: ${{ inputs.azure_tenant_id }}
+        subscription-id: ${{ inputs.azure_subscription_id }}
+
+    - name: 'Get AKS credentials'
+      shell: bash
+      run: |
+        az aks get-credentials \
+          --resource-group "$RG" \
+          --name "$CLUSTER" \
+          --overwrite-existing \
+          --only-show-errors
+        kubelogin convert-kubeconfig -l azurecli
+      env:
+        RG: ${{ inputs.aks_resource_group }}
+        CLUSTER: ${{ inputs.aks_cluster_name }}
+
+    - name: 'Verify deployed digest still running'
+      shell: bash
+      # Guards against a mid-test Flux resume, a pod restart with a stale image, or a
+      # cross-service overwrite -- if the live pod is not the digest we deployed, the test
+      # result would be meaningless, so fail fast (§8.9, Appendix A.4).
+      run: |
+        if ! printf '%s' "$EXPECTED" | grep -Eq '^sha256:[a-f0-9]{64}$'; then
+          echo "::error::expected_digest must be a sha256:<64-hex> digest (got: '$EXPECTED')."
+          exit 1
+        fi
+        SELECTOR=$(kubectl get deployment "$DEPLOYMENT" -n "$NS" \
+          -o go-template='{{range $k,$v := .spec.selector.matchLabels}}{{$k}}={{$v}},{{end}}' | sed 's/,$//')
+        CURRENT_DIGESTS=$(kubectl get pods -n "$NS" -l "$SELECTOR" -o json \
+          | jq -r --arg c "$CONTAINER" '.items[] | select(.metadata.deletionTimestamp == null and .status.phase == "Running") | .status.containerStatuses[]? | select(.name==$c and .ready==true) | .imageID | split("@")[-1]' \
+          | sort -u)
+        if ! grep -Fxq "$EXPECTED" <<< "$CURRENT_DIGESTS"; then
+          echo "::error::No ready, non-terminating pod is running '$EXPECTED'. Observed: ${CURRENT_DIGESTS:-<none>}. Possible Flux resume, pod restart with a stale image, or cross-service overwrite."
+          exit 1
+        fi
+        echo "Verified pod is running the expected digest: $EXPECTED"
+      env:
+        NS: ${{ inputs.namespace }}
+        DEPLOYMENT: ${{ inputs.deployment_name }}
+        CONTAINER: ${{ inputs.container_name }}
+        EXPECTED: ${{ inputs.expected_digest }}
+
+    - name: 'Cross-service health probe (advisory)'
+      id: health
+      shell: bash
+      # Advisory ONLY: sets cluster_state but never the job exit code (§5.3 exit-code table).
+      run: |
+        STATE=healthy
+        if [ -n "$DEPS" ] && [ "$DEPS" != "{}" ]; then
+          # Validate before iterating: `jq -r keys[]` on malformed input prints
+          # nothing and the loop silently becomes a no-op, so a typo in
+          # ACCEPTANCE_TEST_DEPENDENCIES would read as "no dependencies" instead
+          # of a configuration error.
+          if ! jq -e 'type == "object"' >/dev/null 2>&1 <<< "$DEPS"; then
+            echo "::error::dependencies must be a JSON object of service -> health path (got: $DEPS)"
+            exit 1
+          fi
+          for svc in $(jq -r 'keys[]' <<< "$DEPS"); do
+            path=$(jq -r --arg s "$svc" '.[$s]' <<< "$DEPS")
+            # --max-time bounds a hung dependency; without it this advisory probe
+            # can stall the whole lane until the step timeout.
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "${GW}${path}" || echo "000")
+            if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
+              echo "::warning::Dependency '$svc' unhealthy at ${GW}${path} (HTTP $code)"
+              STATE=contaminated
+            fi
+          done
+        fi
+        echo "cluster_state=$STATE" >> "$GITHUB_OUTPUT"
+        echo "Cluster state at start of run: $STATE"
+      env:
+        DEPS: ${{ inputs.dependencies }}
+        GW: ${{ inputs.gateway_url }}
+
+    - name: 'Mint ROOT_USER_TOKEN (no secret) + inject non-secret env'
+      shell: bash
+      # GitHub-Actions port of ADME's GenerateTokenWithoutSecret.yml: mint an app-only token AS the CI
+      # federated identity (azure/login already ran) and hand it to the suite as ROOT_USER_TOKEN, so the
+      # suite skips its client_credentials OIDC flow. This keeps the stack managed-identity-only -- no test
+      # service-principal secret. The token's aud=<aad_client_id> matches the istio RequestAuthentication
+      # audience + the Spring AAD filter; an app-only token (no upn/unique_name, iss=sts.windows.net) is
+      # authorized as a service principal by services that trust AAD SPs (e.g. partition's domain-admin check).
+      # env_map carries NON-SECRET config (e.g. PARTITION_BASE_URL, MY_TENANT) the suite reads from the env.
+      run: |
+        if [ -n "$AAD_CLIENT_ID" ]; then
+          TOKEN=$(az account get-access-token --resource "$AAD_CLIENT_ID" --query accessToken -o tsv)
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Failed to mint app-only token for resource '$AAD_CLIENT_ID' as the CI identity."
+            exit 1
+          fi
+          # Mask BEFORE writing to GITHUB_ENV so the token never appears in logs. Raw token only --
+          # the OSDU suite (TestTokenUtils) prepends 'Bearer ' itself.
+          echo "::add-mask::$TOKEN"
+          {
+            printf '%s<<__TOKEN_EOF__\n' "$ROOT_TOKEN_ENV"
+            printf '%s\n' "$TOKEN"
+            printf '__TOKEN_EOF__\n'
+          } >> "$GITHUB_ENV"
+          echo "Minted '$ROOT_TOKEN_ENV' (app-only, aud=$AAD_CLIENT_ID) as the CI identity."
+          # ADME standardizes every OSDU service IT on -DINTEGRATION_TESTER_ACCESS_TOKEN, minted
+          # without a secret via federated identity (oep-deployment-resources
+          # GenerateTokenWithoutSecret.yml). Export the same mint under that canonical name so the
+          # upstream testing/<svc>-test-azure suites consume it directly; the SPI-custom
+          # partition-acceptance-test reads ROOT_USER_TOKEN (the $ROOT_TOKEN_ENV default above).
+          if [ "$ROOT_TOKEN_ENV" != "INTEGRATION_TESTER_ACCESS_TOKEN" ]; then
+            {
+              printf 'INTEGRATION_TESTER_ACCESS_TOKEN<<__TOKEN_EOF__\n'
+              printf '%s\n' "$TOKEN"
+              printf '__TOKEN_EOF__\n'
+            } >> "$GITHUB_ENV"
+            echo "Also exported the mint as INTEGRATION_TESTER_ACCESS_TOKEN (ADME standard)."
+          fi
+        fi
+        if [ -n "$ENV_MAP" ] && [ "$ENV_MAP" != "{}" ]; then
+          for env_name in $(jq -r 'keys[]' <<< "$ENV_MAP"); do
+            value=$(jq -r --arg k "$env_name" '.[$k]' <<< "$ENV_MAP")
+            {
+              printf '%s<<__ENV_EOF__\n' "$env_name"
+              printf '%s\n' "$value"
+              printf '__ENV_EOF__\n'
+            } >> "$GITHUB_ENV"
+            echo "Exported non-secret env: $env_name"
+          done
+        fi
+      env:
+        AAD_CLIENT_ID: ${{ inputs.aad_client_id }}
+        ROOT_TOKEN_ENV: ${{ inputs.root_token_env }}
+        ENV_MAP: ${{ inputs.env_map }}
+
+    - name: 'Load acceptance-test secrets from Key Vault (masked, multiline-safe)'
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! jq -e 'type == "object"' >/dev/null 2>&1 <<< "$MAP"; then
+          echo "::error::secret_map must be a JSON object of env-var-name -> Key Vault secret name (got: $MAP)"
+          exit 1
+        fi
+        for env_name in $(jq -r 'keys[]' <<< "$MAP"); do
+          secret_name=$(jq -r --arg k "$env_name" '.[$k]' <<< "$MAP")
+          if ! value=$(az keyvault secret show --vault-name "$KV" --name "$secret_name" --query value -o tsv); then
+            echo "::error::Could not read secret '$secret_name' from Key Vault '$KV' (for $env_name)."
+            exit 1
+          fi
+          # Mask BEFORE writing to GITHUB_ENV so it never appears in logs. Workflow
+          # commands are line-oriented, so a multiline secret must be masked line by
+          # line -- a single ::add-mask:: would register only the first line and emit
+          # the rest as ordinary log output.
+          while IFS= read -r line; do
+            [ -n "$line" ] && echo "::add-mask::$line"
+          done <<< "$value"
+          {
+            printf '%s<<__SECRET_EOF__\n' "$env_name"
+            printf '%s\n' "$value"
+            printf '__SECRET_EOF__\n'
+          } >> "$GITHUB_ENV"
+        done
+      env:
+        KV: ${{ inputs.keyvault_name }}
+        MAP: ${{ inputs.secret_map }}
+
+    - name: 'Mint no-data-access token (isolated OIDC login)'
+      if: ${{ inputs.no_data_access_token_env != '' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ -z "$NO_DATA_ACCESS_CLIENT_ID" ]; then
+          echo "::error::no_data_access_client_id is required when no_data_access_token_env is set."
+          exit 1
+        fi
+        if [ -z "$AAD_CLIENT_ID" ]; then
+          echo "::error::aad_client_id is required when no_data_access_token_env is set."
+          exit 1
+        fi
+        if ! [[ "$NO_DATA_ACCESS_TOKEN_ENV" =~ ^[A-Z_][A-Z0-9_]*$ ]]; then
+          echo "::error::Invalid no_data_access_token_env '$NO_DATA_ACCESS_TOKEN_ENV'."
+          exit 1
+        fi
+        if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+          echo "::error::GitHub OIDC request variables are unavailable. The job needs id-token: write."
+          exit 1
+        fi
+
+        OIDC_TOKEN=$(curl --fail-with-body --silent --show-error \
+          -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+          "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api%3A%2F%2FAzureADTokenExchange" \
+          | jq -er '.value')
+        echo "::add-mask::$OIDC_TOKEN"
+
+        TEMP_AZURE_CONFIG=$(mktemp -d)
+        cleanup() {
+          rm -r -- "$TEMP_AZURE_CONFIG"
+        }
+        trap cleanup EXIT
+
+        LOGIN_OK=false
+        for attempt in 1 2 3; do
+          if AZURE_CONFIG_DIR="$TEMP_AZURE_CONFIG" az login \
+            --service-principal \
+            --username "$NO_DATA_ACCESS_CLIENT_ID" \
+            --tenant "$AZURE_TENANT_ID" \
+            --federated-token "$OIDC_TOKEN" \
+            --allow-no-subscriptions \
+            --output none \
+            --only-show-errors; then
+            LOGIN_OK=true
+            break
+          fi
+          echo "::warning::No-data-access OIDC login attempt $attempt failed; retrying."
+          if [ "$attempt" -lt 3 ]; then
+            sleep $((attempt * 10))
+          fi
+        done
+        if [ "$LOGIN_OK" != "true" ]; then
+          echo "::error::Failed to authenticate the shared no-data-access identity."
+          exit 1
+        fi
+
+        TOKEN=""
+        for attempt in 1 2 3; do
+          TOKEN=$(AZURE_CONFIG_DIR="$TEMP_AZURE_CONFIG" az account get-access-token \
+            --resource "$AAD_CLIENT_ID" \
+            --query accessToken \
+            --output tsv \
+            --only-show-errors || true)
+          if [ -n "$TOKEN" ]; then
+            break
+          fi
+          echo "::warning::No-data-access token attempt $attempt failed; retrying."
+          if [ "$attempt" -lt 3 ]; then
+            sleep $((attempt * 5))
+          fi
+        done
+        if [ -z "$TOKEN" ]; then
+          echo "::error::Failed to mint the no-data-access token for resource '$AAD_CLIENT_ID'."
+          exit 1
+        fi
+
+        echo "::add-mask::$TOKEN"
+        {
+          printf '%s<<__TOKEN_EOF__\n' "$NO_DATA_ACCESS_TOKEN_ENV"
+          printf '%s\n' "$TOKEN"
+          printf '__TOKEN_EOF__\n'
+        } >> "$GITHUB_ENV"
+        echo "Minted $NO_DATA_ACCESS_TOKEN_ENV as the shared no-entitlements identity."
+      env:
+        AAD_CLIENT_ID: ${{ inputs.aad_client_id }}
+        AZURE_TENANT_ID: ${{ inputs.azure_tenant_id }}
+        NO_DATA_ACCESS_CLIENT_ID: ${{ inputs.no_data_access_client_id }}
+        NO_DATA_ACCESS_TOKEN_ENV: ${{ inputs.no_data_access_token_env }}
+
+    - name: 'Run acceptance tests (retry on flake)'
+      id: tests
+      uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60  # v4.0.0
+      env:
+        # Passed through the environment rather than interpolated into `command`.
+        # GitHub expands ${{ }} into the script text BEFORE bash parses it, so a
+        # value containing shell metacharacters would become executable code.
+        # Reading them as shell variables keeps them data.
+        TEST_DIR: ${{ inputs.test_dir }}
+        MAVEN_PROFILE: ${{ inputs.maven_profile }}
+        MAVEN_GOAL: ${{ inputs.maven_goal }}
+        GATEWAY_URL: ${{ inputs.gateway_url }}
+      with:
+        timeout_minutes: ${{ inputs.timeout_minutes }}
+        max_attempts: ${{ inputs.max_attempts }}
+        # GATEWAY_URL is exported so acceptance suites that read it from the environment
+        # (e.g. PARTITION_BASE_URL derivations) pick it up; KV-sourced env vars are already
+        # in GITHUB_ENV from the previous step.
+        command: |
+          cd "$TEST_DIR"
+          # maven_goal is a goal list plus flags, so it is intentionally word-split;
+          # `set -f` stops the shell additionally glob-expanding any of those words.
+          set -f
+          if [ -n "$MAVEN_PROFILE" ]; then
+            set -- --batch-mode --no-transfer-progress -P "$MAVEN_PROFILE" $MAVEN_GOAL
+          else
+            set -- --batch-mode --no-transfer-progress $MAVEN_GOAL
+          fi
+          set +f
+          mvn "$@"
+
+    - name: 'Summarize JUnit results'
+      id: junit
+      if: always()
+      shell: bash
+      run: |
+        python "$ACTION_PATH/summarize_junit.py" \
+          --test-dir "$TEST_DIR" \
+          --github-output "$GITHUB_OUTPUT"
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        TEST_DIR: ${{ inputs.test_dir }}
+
+    - name: 'Upload JUnit results'
+      id: report
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      with:
+        name: integration-test-results-${{ inputs.deployment_name }}
+        path: |
+          ${{ inputs.test_dir }}/**/target/surefire-reports/*.xml
+          ${{ inputs.test_dir }}/**/target/failsafe-reports/*.xml
+        if-no-files-found: ignore
+
+    - name: 'Compute test_result + summary'
+      id: result
+      if: always()
+      shell: bash
+      # Binary exit on the TEST outcome; cluster_state only annotates (pass-advisory + label).
+      run: |
+        if [ "$TESTS_OUTCOME" = "success" ]; then
+          if [ "$CLUSTER_STATE" = "contaminated" ]; then
+            RESULT="pass-advisory"
+          else
+            RESULT="pass"
+          fi
+        else
+          RESULT="fail"
+        fi
+        echo "test_result=$RESULT" >> "$GITHUB_OUTPUT"
+        case "$RESULT" in
+          pass) RESULT_LABEL="✅ Pass" ;;
+          pass-advisory) RESULT_LABEL="⚠️ Pass (advisory)" ;;
+          *) RESULT_LABEL="❌ Fail" ;;
+        esac
+        if [ -n "$NO_DATA_TOKEN_ENV" ]; then
+          NO_DATA_LABEL="Enabled (\`$NO_DATA_TOKEN_ENV\`)"
+        else
+          NO_DATA_LABEL="Disabled"
+        fi
+        if [ "${REPORT_FILES:-0}" -gt 0 ]; then
+          TEST_LABEL="${TESTS} total · ${FAILURES} failures · ${ERRORS} errors · ${SKIPPED} skipped"
+          DURATION_LABEL="${DURATION_DISPLAY}"
+        else
+          TEST_LABEL="No JUnit XML reports found"
+          DURATION_LABEL="n/a"
+        fi
+        if [ -n "$ARTIFACT_URL" ]; then
+          ARTIFACT_LABEL="[Download JUnit XML]($ARTIFACT_URL)"
+        else
+          ARTIFACT_LABEL="Not available"
+        fi
+        {
+          echo "### 🧪 Integration Tests"
+          echo ""
+          echo "| Field | Value |"
+          echo "| --- | --- |"
+          echo "| Service | \`${DEPLOYMENT}\` |"
+          echo "| Result | ${RESULT_LABEL} |"
+          echo "| Tests | ${TEST_LABEL} |"
+          echo "| Test duration | ${DURATION_LABEL} |"
+          echo "| Retry attempts | ${ATTEMPTS:-0} |"
+          echo "| Cluster state at start | \`${CLUSTER_STATE:-unavailable}\` |"
+          echo "| Deployed digest | \`${EXPECTED_DIGEST}\` |"
+          echo "| No-data authorization | ${NO_DATA_LABEL} |"
+          echo "| JUnit artifact | ${ARTIFACT_LABEL} |"
+          if [ "$RESULT" = "pass-advisory" ]; then
+            echo ""
+            echo "> A dependency was unhealthy at probe time; the pass may not be fully authoritative."
+          fi
+          if [ "${PARSE_ERRORS:-0}" -gt 0 ]; then
+            echo ""
+            echo "> ⚠️ ${PARSE_ERRORS} JUnit XML report(s) could not be parsed."
+          fi
+        } | tee -a "$GITHUB_STEP_SUMMARY"
+        # Re-surface the real test outcome as this action's exit code.
+        [ "$TESTS_OUTCOME" = "success" ]
+      env:
+        TESTS_OUTCOME: ${{ steps.tests.outcome }}
+        CLUSTER_STATE: ${{ steps.health.outputs.cluster_state }}
+        DEPLOYMENT: ${{ inputs.deployment_name }}
+        ARTIFACT_URL: ${{ steps.report.outputs.artifact-url }}
+        EXPECTED_DIGEST: ${{ inputs.expected_digest }}
+        NO_DATA_TOKEN_ENV: ${{ inputs.no_data_access_token_env }}
+        ATTEMPTS: ${{ steps.tests.outputs.total_attempts }}
+        TESTS: ${{ steps.junit.outputs.tests }}
+        FAILURES: ${{ steps.junit.outputs.failures }}
+        ERRORS: ${{ steps.junit.outputs.errors }}
+        SKIPPED: ${{ steps.junit.outputs.skipped }}
+        DURATION_DISPLAY: ${{ steps.junit.outputs.duration_display }}
+        REPORT_FILES: ${{ steps.junit.outputs.report_files }}
+        PARSE_ERRORS: ${{ steps.junit.outputs.parse_errors }}

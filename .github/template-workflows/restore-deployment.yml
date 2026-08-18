@@ -1,0 +1,137 @@
+# Manually roll a service's Deployment back to a previous-good image digest.
+#
+# Operator break-glass for §8.9: when one bad deploy is poisoning cross-service tests, restore
+# the service to its last-known-good digest without waiting for the original PR author to push
+# a fix. Human-triggered only -- there is NO auto-rollback (NG5 stands).
+#
+# Reads the previous-good digest from a prior deploy run's `aks-deploy` `previous_digest` output
+# (operators copy it from that run's logs/summary). The image already exists in GHCR, so this
+# skips docker-build entirely and just re-points the Deployment.
+#
+# Single-service workflow: the target service is resolved from `vars.SERVICE_NAME`, falling back
+# to this repository's own name (the same derivation validate.yml uses), NOT a dispatch
+# input. Each fork hosts exactly one service; taking `service` as an input would let an operator
+# dispatch `service=storage` in the partition fork and deploy the wrong image into partition's
+# Deployment.
+#
+# Reference: design doc §8.9 + §5.2 (aks-deploy contract). Blocked from merge until W3
+# (.github/actions/aks-deploy) lands -- this workflow `uses:` that action.
+
+name: Restore Deployment
+
+run-name: "restore ${{ vars.SERVICE_NAME || github.event.repository.name }} -> ${{ inputs.digest }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      digest:
+        description: 'Previous-good image digest to restore (must start with sha256:, e.g. sha256:abc123...). Copy it from a prior deploy run''s aks-deploy previous_digest output.'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  # Per-service group, identical to the deploy job's, so a restore cannot race an in-flight
+  # PR deploy for the same service. The fallback must match validate.yml's deploy job
+  # exactly, otherwise an unset SERVICE_NAME yields a different group and the two would
+  # not actually share a lock. cancel-in-progress: false -- never abandon a rollout midway.
+  group: spi-stack-${{ vars.SERVICE_NAME || github.event.repository.name }}
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    name: "Restore deployment"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Pre-flight: resolve the target service"
+        shell: bash
+        # SERVICE_NAME is optional everywhere else in this template: validate.yml derives the
+        # image name, jar path and concurrency group as `vars.SERVICE_NAME ||
+        # github.event.repository.name`. Hard-requiring it here made restore unusable on a
+        # fully-onboarded fork that relies on that fallback, which is precisely when an
+        # operator needs break-glass. Use the same fallback. It stays safe because the value
+        # is still derived from THIS repository rather than from operator input, so a restore
+        # can never target another fork's Deployment.
+        run: |
+          if [ -z "$SERVICE_NAME" ]; then
+            echo "::error::Could not resolve a target service: vars.SERVICE_NAME is unset and the repository name is empty."
+            exit 1
+          fi
+          echo "Target service: $SERVICE_NAME"
+        env:
+          SERVICE_NAME: ${{ vars.SERVICE_NAME || github.event.repository.name }}
+
+      - name: "Validate digest format"
+        shell: bash
+        # Catches the "double sha256:" foot-gun and typos before kubectl ever runs.
+        run: |
+          if ! printf '%s' "$DIGEST" | grep -Eq '^sha256:[a-f0-9]{64}$'; then
+            echo "::error::digest must match ^sha256:[a-f0-9]{64}$ (got: '$DIGEST')."
+            exit 1
+          fi
+        env:
+          DIGEST: ${{ inputs.digest }}
+
+      - name: "Checkout (for the aks-deploy composite action)"
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
+
+      - name: "Install kubectl"
+        uses: azure/setup-kubectl@829323503d1be3d00ca8346e5391ca0b07a9ab0d  # v5.1.0
+
+      - name: "Install kubelogin"
+        uses: azure/use-kubelogin@0ce7c36141aa27d4934872cf00b0120804c98a29  # v1.3
+        with:
+          kubelogin-version: 'v0.1.4'
+
+      - name: "Compute image repository"
+        id: image
+        shell: bash
+        # Reuse the docker-build metadata helper so the restore path derives the GHCR
+        # repository exactly like the build path does. Critically it lowercases: GHCR
+        # rejects uppercase, and github.repository_owner preserves the org's canonical
+        # casing (e.g. "Azure"), so interpolating it raw yields an unpullable
+        # ghcr.io/Azure/<service>.
+        run: ./.github/actions/docker-build/compute-metadata.sh ghcr.io "$OWNER" "$SERVICE_NAME"
+        env:
+          OWNER: ${{ github.repository_owner }}
+          SERVICE_NAME: ${{ vars.SERVICE_NAME || github.event.repository.name }}
+
+      - name: "Restore image (by digest)"
+        uses: ./.github/actions/aks-deploy
+        with:
+          azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+          azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          aks_resource_group: ${{ vars.AKS_RESOURCE_GROUP }}
+          aks_cluster_name: ${{ vars.AKS_CLUSTER_NAME }}
+          namespace: ${{ vars.K8S_NAMESPACE }}
+          flux_namespace: ${{ vars.FLUX_NAMESPACE }}
+          deployment_name: ${{ vars.K8S_DEPLOYMENT_NAME }}
+          container_name: ${{ vars.K8S_CONTAINER_NAME }}
+          image_repository: ${{ steps.image.outputs.image_repository }}
+          image_digest: ${{ inputs.digest }}
+        id: restore
+
+      - name: "Audit summary"
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### ♻️ Restore Deployment"
+            echo ""
+            echo "- Triggered by: \`${{ github.actor }}\`"
+            echo "- Service: \`${SERVICE_NAME}\`"
+            echo "- Deployment: \`${DEPLOYMENT}\`"
+            echo "- Restored to digest: \`${DIGEST}\`"
+            echo "- aks-deploy previous_digest: \`${PREV:-<none>}\`"
+            echo "- aks-deploy deployed_digest: \`${DEPLOYED:-<none>}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          SERVICE_NAME: ${{ vars.SERVICE_NAME || github.event.repository.name }}
+          DEPLOYMENT: ${{ vars.K8S_DEPLOYMENT_NAME }}
+          DIGEST: ${{ inputs.digest }}
+          PREV: ${{ steps.restore.outputs.previous_digest }}
+          DEPLOYED: ${{ steps.restore.outputs.deployed_digest }}

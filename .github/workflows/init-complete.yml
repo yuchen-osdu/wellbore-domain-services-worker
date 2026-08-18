@@ -1,0 +1,445 @@
+name: Initialize Complete
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  validate_and_setup:
+    name: Validate and setup repository
+    if: |
+      github.event.issue.state == 'open' &&
+      contains(github.event.issue.labels.*.name, 'initialization') &&
+      github.event.comment.user.login != 'github-actions[bot]' &&
+      (github.event.comment.author_association == 'OWNER' || github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'COLLABORATOR') &&
+      vars.IS_TEMPLATE != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    outputs:
+      upstream_repo: ${{ steps.validate.outputs.upstream_repo }}
+      should_proceed: ${{ steps.validate.outputs.should_proceed }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5
+
+      - name: Generate GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - name: Template Repository Protection Check
+        id: template_check
+        uses: ./.github/local-actions/template-protection-check
+        with:
+          is_template_var: ${{ vars.IS_TEMPLATE }}
+          github_is_template: ${{ github.event.repository.is_template }}
+
+      - name: Block if template
+        if: steps.template_check.outputs.is_template == 'true'
+        run: |
+          echo "🛡️ BLOCKED: This workflow is blocked in template development repositories"
+          echo "The IS_TEMPLATE variable is set to 'true', which prevents initialization workflows from running."
+          echo "This is a safety mechanism to prevent accidental initialization of the template repository itself."
+          exit 1
+
+      - name: Re-checkout for validation
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}  # Standard token: Checkout operations
+
+      - name: Validate upstream repository
+        id: validate
+        uses: ./.github/local-actions/validate-upstream-repo
+        with:
+          comment_body: ${{ github.event.comment.body }}
+          issue_number: ${{ github.event.issue.number }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}  # Standard token: Posting issue comments
+
+      - name: Set UPSTREAM_REPO_URL Variable
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}  # GitHub App token: Setting repository variables needs admin permission
+        run: |
+          REPO="${{ steps.validate.outputs.upstream_repo }}"
+          if [[ "$REPO" == http* ]]; then
+            REPO_URL="$REPO.git"
+          else
+            REPO_URL="https://github.com/$REPO.git"
+          fi
+          echo "Setting UPSTREAM_REPO_URL variable to: $REPO_URL"
+          echo "URL length: ${#REPO_URL}"
+          if [ -n "$GH_TOKEN" ]; then
+            if ! GH_TOKEN=$GH_TOKEN gh variable set UPSTREAM_REPO_URL --body "$REPO_URL"; then
+              echo "Failed to set UPSTREAM_REPO_URL variable"
+            fi
+          else
+            echo "GH_TOKEN not available, skipping variable configuration"
+          fi
+
+  setup_repository:
+    name: Setup Repository
+    needs: validate_and_setup
+    if: needs.validate_and_setup.outputs.should_proceed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+      issues: write
+    steps:
+      - name: Generate GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}  # Standard token: Checkout operations
+
+      - name: Configure Git
+        uses: ./.github/local-actions/configure-git
+        with:
+          pull_rebase: 'false'
+
+      - name: Upstream Repository
+        uses: ./.github/local-actions/init-helpers
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Standard token: Git operations and posting comments
+        with:
+          operation: setup-upstream
+          github_token: ${{ secrets.GITHUB_TOKEN }}  # Standard token: Git operations and posting comments
+          upstream_repo: ${{ needs.validate_and_setup.outputs.upstream_repo }}
+          issue_number: ${{ github.event.issue.number }}
+          
+      - name: Configure Variables
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}  # GitHub App token: Setting repository variables needs admin permission
+          REPO_URL: ${{ env.REPO_URL }}
+        run: |
+          # Set repository variables using GH_TOKEN (required for admin operations)
+          VARIABLES_SUCCESS=true
+          if [ -n "$GH_TOKEN" ]; then
+            echo "Setting UPSTREAM_REPO_URL variable to: $REPO_URL"
+            echo "URL length: ${#REPO_URL}"
+            if ! GH_TOKEN=$GH_TOKEN gh variable set UPSTREAM_REPO_URL --body "$REPO_URL"; then
+              echo "Failed to set UPSTREAM_REPO_URL variable"
+              VARIABLES_SUCCESS=false
+            fi
+            
+            # Configure GitHub Copilot firewall allowlist if configuration exists
+            if [ -f ".github/fork-resources/copilot-firewall-config.json" ]; then
+              echo "Configuring GitHub Copilot firewall allowlist..."
+              FIREWALL_DOMAINS=$(jq -r '.firewall_additions | join(",")' .github/fork-resources/copilot-firewall-config.json)
+              if [ -n "$FIREWALL_DOMAINS" ] && [ "$FIREWALL_DOMAINS" != "null" ]; then
+                echo "Setting COPILOT_AGENT_FIREWALL_ALLOW_LIST_ADDITIONS to: $FIREWALL_DOMAINS"
+                if ! GH_TOKEN=$GH_TOKEN gh variable set COPILOT_AGENT_FIREWALL_ALLOW_LIST_ADDITIONS --body "$FIREWALL_DOMAINS"; then
+                  echo "Failed to set COPILOT_AGENT_FIREWALL_ALLOW_LIST_ADDITIONS variable"
+                  VARIABLES_SUCCESS=false
+                fi
+              fi
+            fi
+          else
+            echo "GH_TOKEN not available, skipping variable configuration"
+            VARIABLES_SUCCESS=false
+          fi
+          echo "VARIABLES_SUCCESS=$VARIABLES_SUCCESS" >> $GITHUB_ENV
+
+      - name: Branch Structure
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Standard token: Used for git operations only
+        run: |
+          # Check if this is an OSDU partition repository (for debugging)
+          if [[ "${{ needs.validate_and_setup.outputs.upstream_repo }}" == *"partition"* ]]; then
+            # List release branches for OSDU repos (internal logging only)
+            RELEASE_BRANCHES=$(git branch -r | grep upstream/release | sed 's/upstream\///' | tr '\n' ', ')
+            if [ -n "$RELEASE_BRANCHES" ]; then
+              echo "Debug: Found release branches: $RELEASE_BRANCHES"
+            fi
+          fi
+          
+          # Create fork_upstream from upstream's default branch
+          git checkout -b fork_upstream upstream/$DEFAULT_BRANCH
+          
+          # Try to push with error handling for push protection
+          echo "::notice::Pushing fork_upstream branch..."
+
+          # Capture both stdout and stderr, and preserve exit code
+          set +e  # Don't exit on command failure
+          git push -u origin fork_upstream 2>&1 | tee push_output.txt
+          PUSH_EXIT_CODE=${PIPESTATUS[0]}
+          set -e  # Re-enable exit on error
+
+          if [ $PUSH_EXIT_CODE -ne 0 ]; then
+            # Use push protection handler action
+            echo "Push failed, checking for push protection violation..."
+            echo "PUSH_EXIT_CODE=$PUSH_EXIT_CODE" >> $GITHUB_ENV
+          else
+            echo "::notice::Successfully pushed fork_upstream branch"
+            echo "PUSH_EXIT_CODE=0" >> $GITHUB_ENV
+          fi
+
+      - name: Handle fork_upstream push protection
+        if: env.PUSH_EXIT_CODE != '0'
+        uses: ./.github/local-actions/secret-push-handler
+        with:
+          push_output_file: push_output.txt
+          issue_number: ${{ github.event.issue.number }}
+          upstream_repo: ${{ needs.validate_and_setup.outputs.upstream_repo }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}  # Standard token: Posting issue comments
+
+      - name: Exit if fork_upstream push failed
+        if: env.PUSH_EXIT_CODE != '0'
+        run: exit 1
+
+      - name: Continue branch setup
+        if: env.PUSH_EXIT_CODE == '0'
+        run: |
+          # Create fork_integration from fork_upstream
+          git checkout -b fork_integration fork_upstream
+
+          # Restore local actions from main branch since fork_integration lacks template's local actions
+          git checkout main -- .github/local-actions
+
+      - name: Apply sync configuration
+        if: env.PUSH_EXIT_CODE == '0'
+        uses: ./.github/local-actions/sync-config-applier
+        with:
+          sync_config_path: '.github/sync-config.json'
+          source_branch: 'main'
+          template_repo_url: ${{ vars.TEMPLATE_REPO_URL || 'https://github.com/azure/osdu-spi.git' }}
+
+      - name: Push fork_integration branch
+        if: env.PUSH_EXIT_CODE == '0'
+        run: |
+          # Push fork_integration with error handling
+          echo "::notice::Pushing fork_integration branch..."
+          set +e
+          git push -u origin fork_integration 2>&1 | tee push_integration_output.txt
+          PUSH_INTEGRATION_EXIT_CODE=${PIPESTATUS[0]}
+          set -e
+
+          if [ $PUSH_INTEGRATION_EXIT_CODE -ne 0 ]; then
+            echo "::error::fork_integration push failed"
+            echo "::notice::This is expected if the upstream repository contains secrets"
+            echo "::notice::The same allowlist URLs from the previous error will resolve this issue"
+            echo "PUSH_INTEGRATION_EXIT_CODE=$PUSH_INTEGRATION_EXIT_CODE" >> $GITHUB_ENV
+          else
+            echo "::notice::Successfully pushed fork_integration branch"
+            echo "PUSH_INTEGRATION_EXIT_CODE=0" >> $GITHUB_ENV
+          fi
+
+      - name: Handle fork_integration push protection
+        if: env.PUSH_INTEGRATION_EXIT_CODE != '0'
+        uses: ./.github/local-actions/secret-push-handler
+        with:
+          push_output_file: push_integration_output.txt
+          issue_number: ${{ github.event.issue.number }}
+          upstream_repo: ${{ needs.validate_and_setup.outputs.upstream_repo }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}  # Standard token: Posting issue comments
+
+      - name: Exit if fork_integration push failed
+        if: env.PUSH_INTEGRATION_EXIT_CODE != '0'
+        run: exit 1
+
+      - name: Final branch setup
+        if: env.PUSH_INTEGRATION_EXIT_CODE == '0'
+        run: echo "✅ Both branches successfully created"
+
+      - name: Merge to Main
+        uses: ./.github/local-actions/merge-with-theirs-resolution
+        with:
+          source_branch: fork_integration
+          target_branch: main
+          commit_message: "chore: complete repository initialization"
+          issue_number: ${{ github.event.issue.number }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}  # Standard token: Git merge operations and posting comments
+
+      - name: Generate Service Descriptor
+        id: service_descriptor
+        env:
+          SERVICE_NAME: ${{ vars.SERVICE_NAME || github.event.repository.name }}
+        run: |
+          set -euo pipefail
+          # ADR-039: upstream code is now merged into main, so the service shape can be detected
+          # once and persisted as the fork-owned `.spi/service.yaml`. Ambiguous or unsupported
+          # shapes halt initialization with an actionable error instead of guessing a build lane.
+          python3 .github/scripts/service-config/generate_descriptor.py \
+            --root . \
+            --service-name "${SERVICE_NAME}"
+          git add .spi/service.yaml
+
+      - name: Report Service Descriptor Failure
+        if: failure() && steps.service_descriptor.outcome == 'failure'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Standard token: Posting issue comments
+        run: |
+          {
+            echo "## ⚠️ Service descriptor could not be generated"
+            echo ""
+            echo "Initialization halted because this repository's build shape is ambiguous or not"
+            echo "yet supported (expected \`pom.xml\`, or \`pyproject.toml\` with \`uv.lock\`)."
+            echo ""
+            echo "**Next step:** commit a hand-written \`.spi/service.yaml\` declaring a supported"
+            echo "archetype (see \`.github/scripts/service-config/schema.json\`), then re-run"
+            echo "initialization."
+          } > descriptor-failure.md
+          gh issue comment "${{ github.event.issue.number }}" --body-file descriptor-failure.md || true
+          rm -f descriptor-failure.md
+
+      - name: Finalize Initialization
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Standard token: Available but not used (GitHub App token required for workflows)
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}  # GitHub App token: Pushing workflow files needs 'workflows' permission + setting variables needs admin
+          # ADR-039: optional per-organization owner for the seeded `/.spi/` CODEOWNERS rule.
+          # Unset leaves a documented placeholder rather than an invalid team reference.
+          SPI_ENGINEERING_OWNERS: ${{ vars.SPI_ENGINEERING_OWNERS }}
+        run: |
+          # Copy workflows from template-workflows before deploy-fork-resources deletes the directory
+          echo "Deploying production workflows from template..."
+          if [ -d ".github/template-workflows" ]; then
+            mkdir -p .github/workflows
+            if ls .github/template-workflows/*.yml 1> /dev/null 2>&1; then
+              cp .github/template-workflows/*.yml .github/workflows/
+              echo "✅ Template workflows copied"
+            else
+              echo "⚠️  No .yml files found in template-workflows"
+            fi
+          else
+            echo "⚠️  Warning: .github/template-workflows directory not found"
+          fi
+
+          # Save setup scripts and templates to temp location before cleanup deletes them
+          echo "Preserving setup scripts and templates for post-push configuration..."
+          mkdir -p /tmp/init-helpers /tmp/templates/manual-steps
+          cp .github/local-actions/init-helpers/setup-security.sh /tmp/init-helpers/
+          # setup-rulesets.sh now lives durably at .github/scripts/settings-apply/ (survives cleanup,
+          # reused by settings-apply.yml) — no temp preservation needed.
+          cp .github/local-actions/templates/initialization-complete.md /tmp/templates/
+          cp .github/local-actions/templates/mcp-setup-issue.md /tmp/templates/
+          cp .github/local-actions/templates/manual-steps/*.md /tmp/templates/manual-steps/
+          chmod +x /tmp/init-helpers/*.sh
+
+          # Deploy fork-specific resources and clean up template files
+          ./.github/local-actions/init-helpers/deploy-fork-resources.sh
+
+          # Add all changes to the merge commit
+          git add -A
+          if ! git diff --staged --quiet; then
+            git commit --amend --no-edit
+          fi
+
+          # Push using GH_TOKEN if available (needed for workflow permissions)
+          if [ -n "$GH_TOKEN" ]; then
+            echo "Pushing to main using GH_TOKEN (required for workflow deployment)..."
+
+            # Reconfigure git to use GH_TOKEN instead of GITHUB_TOKEN from checkout
+            # The checkout action's credential helper must be overridden
+            git config --unset-all http.https://github.com/.extraheader || true
+            git remote set-url origin https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git
+
+            git push origin main
+          else
+            echo "::error::GH_TOKEN not available - cannot push workflows without it"
+            echo "::error::Workflows require a Personal Access Token with 'workflow' scope"
+            exit 1
+          fi
+          
+          # Set repository variable for initialization status
+          if [ -n "$GH_TOKEN" ]; then
+            GH_TOKEN=$GH_TOKEN gh variable set INITIALIZATION_COMPLETE --body "true"
+          fi
+
+      - name: Configure Security
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}  # GitHub App token: Security settings need admin permission
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Standard token: Posting issue comments
+        run: |
+          # Use preserved script from temp location
+          /tmp/init-helpers/setup-security.sh "${{ github.repository }}" "${{ github.event.issue.number }}"
+
+      - name: Setup Repository Rulesets
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}  # GitHub App token: Ruleset creation needs admin permission
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Standard token: Posting issue comments
+        run: |
+          # Durable path (survives init cleanup); the same idempotent script settings-apply.yml runs
+          bash .github/scripts/settings-apply/setup-rulesets.sh "${{ github.repository }}" "${{ github.event.issue.number }}"
+
+      - name: Update Status
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Standard token: Posting issue comments
+        run: |
+          # Build status lines based on success flags
+          if [ "$VARIABLES_SUCCESS" = "true" ]; then
+            VARIABLE_STATUS="**Repository Variables:** UPSTREAM_REPO_URL and GitHub Copilot firewall allowlist configured"
+          else
+            VARIABLE_STATUS="⚠️ **Repository Variables:** Requires manual setup (including Copilot firewall allowlist)"
+          fi
+
+          if [ "$SECURITY_SUCCESS" = "true" ]; then
+            SECURITY_STATUS="**Security Features:** Secret scanning, dependency updates, and GitHub Copilot automatic code review enabled"
+          else
+            SECURITY_STATUS="⚠️ **Security Features:** Requires manual setup"
+          fi
+
+          if [ "$RULESET_SUCCESS" = "true" ]; then
+            RULESET_STATUS="**Repository Rulesets:** Default Branch Protection (main) and Integration Branch Protection (fork_upstream, fork_integration) rulesets active"
+          else
+            RULESET_STATUS="⚠️ **Repository Rulesets:** Requires manual setup"
+          fi
+
+          # Assemble manual steps if needed (using preserved templates from /tmp)
+          MANUAL_STEPS=""
+          if [ "$VARIABLES_SUCCESS" != "true" ] || [ "$SECURITY_SUCCESS" != "true" ] || [ "$RULESET_SUCCESS" != "true" ]; then
+            MANUAL_STEPS="## Manual Configuration Required
+
+          Some features require manual setup:
+          "
+            [ "$VARIABLES_SUCCESS" != "true" ] && MANUAL_STEPS+="$(cat /tmp/templates/manual-steps/repository-variables.md)"$'\n'
+            [ "$SECURITY_SUCCESS" != "true" ] && MANUAL_STEPS+="$(cat /tmp/templates/manual-steps/security-features.md)"$'\n'
+            [ "$RULESET_SUCCESS" != "true" ] && MANUAL_STEPS+="- **Repository Rulesets:** Go to Settings → Rules → Rulesets and create rulesets based on configurations in \`.github/rulesets/\`"$'\n'
+          fi
+
+          # Read template and substitute placeholders (using preserved template from /tmp)
+          MESSAGE=$(cat /tmp/templates/initialization-complete.md)
+          MESSAGE="${MESSAGE//\{VARIABLE_STATUS\}/$VARIABLE_STATUS}"
+          MESSAGE="${MESSAGE//\{SECURITY_STATUS\}/$SECURITY_STATUS}"
+          MESSAGE="${MESSAGE//\{RULESET_STATUS\}/$RULESET_STATUS}"
+          MESSAGE="${MESSAGE//\{MANUAL_STEPS\}/$MANUAL_STEPS}"
+          MESSAGE="${MESSAGE//\{UPSTREAM_REPO\}/${{ needs.validate_and_setup.outputs.upstream_repo }}}"
+
+          # Post completion message
+          echo "$MESSAGE" | gh issue comment "${{ github.event.issue.number }}" --body-file -
+
+      - name: Create MCP Configuration Issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Standard token: Creating issues
+        run: |
+          # Use preserved template from /tmp
+          gh issue create \
+            --title "Configure MCP Server for GitHub Copilot Agent" \
+            --body-file /tmp/templates/mcp-setup-issue.md \
+            --label "human-required"
+
+          echo "Created MCP configuration issue"
+
+      - name: Complete Initialization
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Standard token: Closing issues
+        run: |
+          # Close the initialization issue
+          gh issue close "${{ github.event.issue.number }}" --reason completed

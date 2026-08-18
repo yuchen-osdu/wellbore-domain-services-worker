@@ -1,0 +1,167 @@
+name: Release Management
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '.github/**'
+
+# Add workflow-level permissions
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  check-initialization:
+    name: "🔍 Check Repository State"
+    runs-on: ubuntu-latest
+    outputs:
+      initialized: ${{ steps.check.outputs.initialized }}
+    steps:
+      - name: "Checkout Code"
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
+        
+      - name: "Verify Initialization Status"
+        id: check
+        run: |
+          # Check repository variable instead of file
+          if [ "${{ vars.INITIALIZATION_COMPLETE }}" = "true" ]; then
+            echo "initialized=true" >> $GITHUB_OUTPUT
+          else
+            echo "initialized=false" >> $GITHUB_OUTPUT
+          fi
+          
+  release-please:
+    name: "📦 Create Release"
+    needs: check-initialization
+    if: needs.check-initialization.outputs.initialized == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      # Manifest config (.release-please-config.json) emits path-prefixed outputs; fall back to top-level.
+      version: ${{ steps.release.outputs['.--version'] || steps.release.outputs.version }}
+      tag_name: ${{ steps.release.outputs['.--tag_name'] || steps.release.outputs.tag_name }}
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: "Generate GitHub App Token"
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - name: "Generate Release PR"
+        uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38  # v4
+        id: release
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          config-file: .release-please-config.json
+          
+  tag-with-upstream:
+    name: "🏷️ Update Release Tags"
+    needs: [check-initialization, release-please]
+    if: needs.check-initialization.outputs.initialized == 'true' && needs.release-please.outputs.release_created
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Generate GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - name: "Checkout Code"
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
+        with:
+          fetch-depth: 0
+          
+      - name: "Fetch Upstream Version"
+        env:
+          UPSTREAM_REPO_URL: ${{ vars.UPSTREAM_REPO_URL }}
+        run: |
+          git remote add upstream "$UPSTREAM_REPO_URL"
+          git fetch upstream --tags --force
+          UPSTREAM_VERSION=$(git describe --tags --abbrev=0 upstream/main 2>/dev/null || echo "v0.0.0")
+          echo "UPSTREAM_VERSION=$UPSTREAM_VERSION" >> $GITHUB_ENV
+          
+      - name: "Update Release Tags"
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          # Get the latest release tag
+          RELEASE_TAG=$(gh release list -L 1 | cut -f 3)
+          
+          # Create correlation tag with upstream reference (additive approach)
+          CORRELATION_TAG="${RELEASE_TAG}-upstream-${UPSTREAM_VERSION}"
+          
+          # Only create correlation tag if it doesn't already exist
+          if ! git tag -l "${CORRELATION_TAG}" | grep -q .; then
+            git tag $CORRELATION_TAG
+            git push origin $CORRELATION_TAG
+          fi
+          
+          # Update release notes without changing the original tag
+          RELEASE_NOTES=$(gh release view $RELEASE_TAG --json body -q .body)
+          gh release edit $RELEASE_TAG \
+            --notes "${RELEASE_NOTES}
+
+            Upstream Version: ${UPSTREAM_VERSION}
+            Correlation Tag: ${CORRELATION_TAG}"
+
+  retag-image:
+    name: "🏷️ Tag Release Image"
+    needs: [check-initialization, release-please]
+    # Gate on version presence (robust to manifest-prefixed vs top-level release-please outputs).
+    if: needs.check-initialization.outputs.initialized == 'true' && needs.release-please.outputs.version != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write         # registry-side retag of the already-pushed image
+    steps:
+      - name: "Log in to GHCR"
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee  # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: "Tag release image with semver"
+        env:
+          VERSION: ${{ needs.release-please.outputs.version }}
+          OWNER: ${{ github.repository_owner }}
+          SERVICE_NAME: ${{ vars.SERVICE_NAME }}
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          set -euo pipefail
+          # Registry-side retag: add :<version> to the release commit's image. No rebuild.
+          OWNER_LC=$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')
+          SERVICE=$(printf '%s' "${SERVICE_NAME:-$REPO_NAME}" | tr '[:upper:]' '[:lower:]')
+          REPO="ghcr.io/${OWNER_LC}/${SERVICE}"
+          # Source the immutable :sha-<short> of THIS commit — not the mutable :main-snapshot, which can
+          # still point at the prior commit until validate.yml's concurrent docker-push catches up.
+          SRC="${REPO}:sha-${GITHUB_SHA:0:12}"
+
+          # Wait for the concurrent docker-push (validate.yml, same push to main) to publish this image.
+          # A full Maven + Docker build can take many minutes on a cold cache, so poll generously; the
+          # loop breaks the moment the image appears, so a warm build still completes near-instantly.
+          found=false
+          for attempt in $(seq 1 60); do
+            if docker buildx imagetools inspect "$SRC" >/dev/null 2>&1; then found=true; break; fi
+            echo "Source ${SRC} not present yet (attempt ${attempt}/60); waiting for docker-push…"
+            sleep 20
+          done
+          if [ "$found" != "true" ]; then
+            echo "::error::Release image source ${SRC} did not appear within ~20 min; validate.yml docker-push may have failed for this commit."
+            exit 1
+          fi
+
+          docker buildx imagetools create --tag "${REPO}:${VERSION}" "$SRC"
+          echo "Tagged \`${REPO}:${VERSION}\` from \`${SRC}\`" >> "$GITHUB_STEP_SUMMARY" 

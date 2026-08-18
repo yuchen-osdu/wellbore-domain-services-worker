@@ -1,0 +1,247 @@
+name: CodeQL Analysis
+
+on:
+  push:
+    branches: [ main, fork_upstream, fork_integration ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 6 * * 1'  # Weekly on Mondays at 6 AM UTC
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+jobs:
+  check-paths:
+    name: Check if Code Changes Present
+    runs-on: ubuntu-latest
+    outputs:
+      should-run: ${{ steps.filter.outputs.should-run }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
+        with:
+          fetch-depth: 0
+
+      - name: Check for code changes
+        id: filter
+        run: |
+          # For scheduled runs and workflow_dispatch, always run
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "should-run=true" >> $GITHUB_OUTPUT
+            echo "Running CodeQL: Scheduled or manual trigger"
+            exit 0
+          fi
+
+          # For push events, check against previous commit
+          if [ "${{ github.event_name }}" = "push" ]; then
+            BASE_SHA="${{ github.event.before }}"
+            HEAD_SHA="${{ github.sha }}"
+          # For pull requests, check against base branch
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          else
+            echo "should-run=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Get list of changed files
+          CHANGED_FILES=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" || echo "")
+
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "should-run=true" >> $GITHUB_OUTPUT
+            echo "Running CodeQL: Unable to determine changed files"
+            exit 0
+          fi
+
+          # Check if any changed files are NOT in the ignore list
+          SHOULD_RUN=false
+          while IFS= read -r file; do
+            # .spi/ is the service descriptor: it selects the build archetype (and therefore the
+            # analyzed language set), so a descriptor-only change is never config-only (ADR-039).
+            case "$file" in .spi/*) SHOULD_RUN=true; break ;; esac
+            # Skip if file matches ignore patterns
+            if echo "$file" | grep -qE '^(\.github/|\.mvn/|devops/|docs/|\..*|.*\.md)$'; then
+              continue
+            fi
+            # Found a file that should trigger CodeQL
+            SHOULD_RUN=true
+            break
+          done <<< "$CHANGED_FILES"
+
+          if [ "$SHOULD_RUN" = "true" ]; then
+            echo "should-run=true" >> $GITHUB_OUTPUT
+            echo "Running CodeQL: Code changes detected"
+          else
+            echo "should-run=false" >> $GITHUB_OUTPUT
+            echo "Skipping CodeQL: Only ignored paths changed (.github/, .mvn/, devops/, docs/, dotfiles, *.md; .spi/ always runs)"
+          fi
+
+  detect-languages:
+    needs: check-paths
+    if: needs.check-paths.outputs.should-run == 'true'
+    name: Detect Project Languages
+    runs-on: ubuntu-latest
+    outputs:
+      languages: ${{ steps.detect.outputs.languages }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
+
+      - name: Detect languages
+        id: detect
+        run: |
+          LANGUAGES='[]'
+
+          # Check for Java (Maven or Gradle)
+          if [ -f "pom.xml" ] || [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+            LANGUAGES=$(echo "$LANGUAGES" | jq -c '. + ["java-kotlin"]')
+          fi
+
+          # Check for Python (exclude build directories and common generated code paths)
+          if [ -f "setup.py" ] || [ -f "pyproject.toml" ] || [ -f "requirements.txt" ] || \
+             find . -name "*.py" \
+               -not -path "./.*" \
+               -not -path "*/build/*" \
+               -not -path "*/build-*/*" \
+               -not -path "*/target/*" \
+               -not -path "*/dist/*" \
+               -not -path "*/__pycache__/*" \
+               -not -path "*/.venv/*" \
+               -not -path "*/venv/*" \
+               -not -path "*/.pytest_cache/*" \
+               -not -path "*/.mypy_cache/*" \
+               -not -path "*/node_modules/*" | grep -q .; then
+            LANGUAGES=$(echo "$LANGUAGES" | jq -c '. + ["python"]')
+          fi
+
+          # Check for JavaScript/TypeScript
+          if [ -f "package.json" ] || find . -name "*.js" -o -name "*.ts" -not -path "./node_modules/*" -not -path "./.*" | grep -q .; then
+            LANGUAGES=$(echo "$LANGUAGES" | jq -c '. + ["javascript-typescript"]')
+          fi
+
+          # Check for Go
+          if [ -f "go.mod" ] || find . -name "*.go" -not -path "./.*" | grep -q .; then
+            LANGUAGES=$(echo "$LANGUAGES" | jq -c '. + ["go"]')
+          fi
+
+          # Default to java-kotlin if nothing detected (OSDU is primarily Java)
+          if [ "$LANGUAGES" = "[]" ]; then
+            LANGUAGES='["java-kotlin"]'
+          fi
+
+          echo "languages=$LANGUAGES" >> $GITHUB_OUTPUT
+          echo "Detected languages: $LANGUAGES"
+
+  analyze:
+    name: Analyze Code
+    needs: [check-paths, detect-languages]
+    if: needs.check-paths.outputs.should-run == 'true' && needs.detect-languages.outputs.languages != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ${{ fromJSON(needs.detect-languages.outputs.languages) }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
+
+      - name: Setup Java
+        if: matrix.language == 'java-kotlin'
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654  # v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'maven'
+
+      - name: Setup Python
+        if: matrix.language == 'python'
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6
+        with:
+          python-version: '3.x'
+
+      - name: Setup Node.js
+        if: matrix.language == 'javascript-typescript'
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@caa5102941e77fe39b460490c70318beb68c5c25  # v4
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended
+          build-mode: none
+          config: |
+            paths-ignore:
+              - '**/build/**'
+              - '**/build-*/**'
+              - '**/target/**'
+              - '**/dist/**'
+              - '**/__pycache__/**'
+              - '**/.venv/**'
+              - '**/venv/**'
+              - '**/node_modules/**'
+              - '**/.pytest_cache/**'
+              - '**/.mypy_cache/**'
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@caa5102941e77fe39b460490c70318beb68c5c25  # v4
+        with:
+          category: "/language:${{matrix.language}}"
+
+  # Summary job that always reports as "CodeQL" to satisfy required status checks
+  # This job name matches the required check context in repository rulesets
+  CodeQL:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    needs: [check-paths, detect-languages, analyze]
+    if: always()
+    steps:
+      - name: Report CodeQL Status
+        run: |
+          # Check if check-paths succeeded
+          if [ "${{ needs.check-paths.result }}" != "success" ]; then
+            echo "❌ Code path check failed"
+            exit 1
+          fi
+
+          # If should-run is false, all checks passed (config-only changes)
+          if [ "${{ needs.check-paths.outputs.should-run }}" = "false" ]; then
+            echo "✅ CodeQL skipped - only configuration files changed"
+            exit 0
+          fi
+
+          # If should-run is true, check that analysis completed successfully
+          if [ "${{ needs.detect-languages.result }}" != "success" ]; then
+            echo "❌ Language detection failed"
+            exit 1
+          fi
+
+          # Check analyze job result:
+          # - "success": analysis completed for at least one detected language
+          # - "skipped": can occur if (a) should-run is false (handled above), or (b) no languages were detected
+          # - "failure"/"cancelled": actual analysis errors
+
+          # If analyze is skipped when should-run is true, no languages were detected - this should fail
+          if [ "${{ needs.analyze.result }}" = "skipped" ]; then
+            echo "❌ CodeQL analysis skipped - no languages detected in repository"
+            echo "This indicates a configuration issue or repository with no analyzable code"
+            exit 1
+          fi
+
+          # Check for actual failures
+          if [ "${{ needs.analyze.result }}" = "failure" ] || [ "${{ needs.analyze.result }}" = "cancelled" ]; then
+            echo "❌ CodeQL analysis failed or was cancelled"
+            exit 1
+          fi
+
+          echo "✅ CodeQL checks completed successfully"
