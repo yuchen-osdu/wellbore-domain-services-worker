@@ -19,10 +19,23 @@ build:
     packageManager: uv
     lockfile: uv.lock
     runtimeVersion: "3.12"
+    compatibilityVersions: ["3.13"]
     distribution: osdu-wbddms-worker
     importPackage: wdmsworker
-    testExtras: [dev]
+    testExtras: [dev, aws]
     runtimeExtras: [az]
+
+tests:
+  unit:
+    type: pytest
+    path: tests/unit
+    coverage: true
+  serviceInProcess:
+    type: pytest
+    path: tests/service
+  serviceSubprocess:
+    type: pytest
+    path: tests/service
 
 container:
   appModule: wdmsworker.app:app
