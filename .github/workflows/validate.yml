@@ -480,8 +480,8 @@ jobs:
           generate_coverage: ${{ github.event_name == 'pull_request' && needs.read-service-config.outputs.has_coverage == 'true' }}
 
   python-compatibility:
-    name: "🐍 Python ${{ matrix.version || 'No-op' }} Compatibility"
-    needs: [check-initialization, check-repo-state, check-paths, read-service-config]
+    name: "🐍 Python Compatibility"
+    needs: [check-initialization, check-repo-state, check-paths, read-service-config, python-build]
     if: |
       needs.check-repo-state.outputs.is_initialized == 'true' &&
       needs.read-service-config.outputs.build_lane == 'python' &&
@@ -534,22 +534,20 @@ jobs:
           artifact_suffix: ${{ matrix.artifact_suffix }}
 
   docker-build:
-    # Validate-only worker. NOT the required check — the required "🐳 Docker Build" context is the
-    # summary job below (docker-build-required), which reports once even when this job is skipped.
-    name: "🐳 Docker Build (validate)"
-    needs: [check-initialization, check-repo-state, read-service-config, java-build, python-build, python-compatibility]
-    # `!cancelled()` is required because exactly one language lane runs and the other is
-    # skipped; without it a skipped dependency would skip this job in every repository.
-    # The explicit result+output checks keep the Java behaviour identical (a failed or
-    # skipped java-build still means no Docker validation).
+    # Read-only image validation. It runs without registry credentials on every selected
+    # language lane, including untrusted PR contexts. The credentialed publish job below
+    # repeats the BuildKit solve (normally cache-backed) and validates the release platform
+    # set before pushing. NOT the required check: docker-build-required reports that context.
+    name: "📦 Container Image Validation"
+    needs: [read-service-config, java-build, python-compatibility]
     if: |
-      !cancelled() && (
-        (needs.java-build.result == 'success' && needs.java-build.outputs.build_result == 'success') ||
-        (needs.python-build.result == 'success' && needs.python-build.outputs.build_result == 'success')
-      ) &&
+      !cancelled() &&
       (
-        needs.read-service-config.outputs.build_lane != 'python' ||
-        needs.python-compatibility.result == 'success'
+        (needs.java-build.result == 'success' && needs.java-build.outputs.build_result == 'success') ||
+        (
+          needs.read-service-config.outputs.build_lane == 'python' &&
+          needs.python-compatibility.result == 'success'
+        )
       )
     runs-on: ubuntu-latest
     permissions:
@@ -582,7 +580,7 @@ jobs:
           fi
           echo "✅ Local actions and Dockerfile restored - validation can proceed"
 
-      - name: "Docker Build (validate-only)"
+      - name: "Validate Container Image"
         uses: ./.github/actions/docker-build
         with:
           push: 'false'                       # validates the Dockerfile compiles; no GHCR login/push
@@ -600,23 +598,15 @@ jobs:
           jar_file: ${{ vars.SERVICE_TARGET_JAR || format('provider/{0}-azure/target/*-spring-boot.jar', vars.SERVICE_NAME || github.event.repository.name) }}
 
   docker-push:
-    name: "🐳 Docker Push"
-    needs: [check-initialization, check-repo-state, read-service-config, java-build, python-build, python-compatibility, docker-build]
+    name: "📤 Build & Publish Container Image"
+    needs: [read-service-config, docker-build]
     # §5.5 trust boundary (ADR-036): push to GHCR only on trusted events. The force_full_pipeline
     # arm is declared by W13 (#19); until then it evaluates null and is harmless.
     # `!cancelled()` only compensates for the skipped sibling language lane, so the build-success
-    # requirement that GitHub previously applied implicitly to *both* arms is now written out
-    # ahead of the (unchanged) trust clause.
+    # requirement is represented by the successful read-only container validation. That job
+    # directly verifies the selected Java/Python lane before this credentialed solve begins.
     if: |
       !cancelled() &&
-      (
-        (needs.java-build.result == 'success' && needs.java-build.outputs.build_result == 'success') ||
-        (needs.python-build.result == 'success' && needs.python-build.outputs.build_result == 'success')
-      ) &&
-      (
-        needs.read-service-config.outputs.build_lane != 'python' ||
-        needs.python-compatibility.result == 'success'
-      ) &&
       needs.docker-build.result == 'success' &&
       (
         (
@@ -663,7 +653,7 @@ jobs:
           fi
           echo "✅ Local actions restored - validation can proceed"
 
-      - name: "Docker Build and Push"
+      - name: "Build and Publish Container Image"
         id: push
         uses: ./.github/actions/docker-build
         with:
@@ -856,12 +846,12 @@ jobs:
 
   docker-build-required:
     # Required branch-protection check "🐳 Docker Build" (ADR-030 summary-job pattern, mirrors the
-    # CodeQL summary job). Consolidates the selected language build and the validate-only image
-    # build into one always-reporting context so the required check never wedges
+    # CodeQL summary job). Reports the selected lane + read-only image validation as
+    # one stable context; trusted publication remains a separate credentialed stage.
     # (config-only/no-lane/dependabot/uninitialized all pass) and a real build failure blocks.
     # Suppressed on pull_request_target so the dual trigger reports it once.
     name: "🐳 Docker Build"
-    needs: [check-initialization, check-repo-state, check-paths, read-service-config, java-build, python-build, python-compatibility, docker-build]
+    needs: [check-initialization, check-repo-state, check-paths, read-service-config, docker-build]
     if: always() && github.event_name != 'pull_request_target'
     runs-on: ubuntu-latest
     steps:
@@ -900,35 +890,14 @@ jobs:
           if [ "${{ needs.read-service-config.outputs.build_lane }}" = "none" ]; then
             echo "✅ Docker Build skipped - no build lane selected (non-Java repository, no descriptor)"; exit 0
           fi
-          if [ "${{ needs.java-build.result }}" = "failure" ] || [ "${{ needs.java-build.result }}" = "cancelled" ]; then
-            echo "❌ Java build failed or was cancelled"; exit 1
-          fi
-          if [ "${{ needs.python-build.result }}" = "failure" ] || [ "${{ needs.python-build.result }}" = "cancelled" ]; then
-            echo "❌ Python build failed or was cancelled"; exit 1
-          fi
-          if [ "${{ needs.python-compatibility.result }}" = "failure" ] || [ "${{ needs.python-compatibility.result }}" = "cancelled" ]; then
-            echo "❌ Python compatibility build failed or was cancelled"; exit 1
-          fi
-          # The selected lane must actually have run and produced an image build. A present
-          # descriptor may never pass because its lane silently skipped (ADR-039 §6.3).
-          if [ "${{ needs.read-service-config.outputs.build_lane }}" = "python" ]; then
-            if [ "${{ needs.python-build.result }}" != "success" ]; then
-              echo "❌ Python build did not run for a python descriptor (result: ${{ needs.python-build.result }})"; exit 1
-            fi
-            if [ -n "${{ needs.read-service-config.outputs.python_compatibility_versions }}" ] && \
-               [ "${{ needs.python-compatibility.result }}" != "success" ]; then
-              echo "❌ Python compatibility versions did not pass: ${{ needs.read-service-config.outputs.python_compatibility_versions }}"
-              exit 1
-            fi
-            if [ "${{ needs.docker-build.result }}" != "success" ]; then
-              echo "❌ Docker build did not run for the python lane (result: ${{ needs.docker-build.result }})"; exit 1
-            fi
-            echo "✅ Python build and container image validated"
-          fi
           if [ "${{ needs.docker-build.result }}" = "failure" ] || [ "${{ needs.docker-build.result }}" = "cancelled" ]; then
-            echo "❌ Docker build failed or was cancelled"; exit 1
+            echo "❌ Read-only container validation failed or was cancelled"; exit 1
           fi
-          echo "✅ Docker Build checks completed successfully"
+          if [ "${{ needs.docker-build.result }}" = "success" ]; then
+            echo "✅ Container image validated without registry write"; exit 0
+          fi
+          echo "❌ The selected language lane did not produce a container validation job"
+          exit 1
 
   # ──────────────────────────────────────────────────────────────────────────────
   # Deploy lane (W5b). Appended after docker-push; both jobs consume the trusted
@@ -940,15 +909,16 @@ jobs:
   # ──────────────────────────────────────────────────────────────────────────────
   deploy:
     name: "🚀 Deploy to spi-stack"
-    needs: [check-initialization, check-repo-state, read-service-config, java-build, docker-push]
+    needs: [read-service-config, docker-push]
     # Java-only by design: the Python lane stops at a published GHCR image (issue #42).
     # `build_lane == 'java'` is explicit rather than implied by java-build's outputs, and
-    # this job deliberately has no status function in `if:` — a skipped java-build keeps
-    # the whole deploy lane skipped for a Python service.
+    # `!cancelled()` neutralizes the skipped Python sibling jobs in the transitive
+    # dependency graph. Every selected-lane dependency is checked explicitly below,
+    # so a failed/skipped Java build or Docker push still fails closed.
     if: |
-      (
+      !cancelled() && (
         needs.read-service-config.outputs.build_lane == 'java' &&
-        needs.java-build.outputs.build_result == 'success' &&
+        needs.docker-push.result == 'success' &&
         vars.AZURE_CLIENT_ID != '' &&
         github.actor != 'dependabot[bot]' &&
         github.event_name != 'pull_request_target' &&
@@ -956,9 +926,11 @@ jobs:
         (github.event_name != 'pull_request' ||
          github.event.pull_request.head.repo.full_name == github.repository)
       ) || (
+        !cancelled() &&
         github.event_name == 'workflow_dispatch' &&
         inputs.force_full_pipeline == true &&
         needs.read-service-config.outputs.build_lane == 'java' &&
+        needs.docker-push.result == 'success' &&
         vars.AZURE_CLIENT_ID != ''
       )
     runs-on: ubuntu-latest
@@ -999,13 +971,16 @@ jobs:
 
   integration-test:
     name: "🧪 Integration Tests"
-    needs: [check-initialization, check-repo-state, read-service-config, java-build, docker-push, deploy]
+    needs: [read-service-config, docker-push, deploy]
     # Java-only by design, same gating as the deploy job (issue #42 keeps the Python
-    # lane at build + image; no Python deploy or acceptance suite is wired).
+    # lane at build + image; no Python deploy or acceptance suite is wired). The
+    # explicit result gates keep `!cancelled()` from admitting a failed Java/deploy
+    # dependency while allowing skipped Python siblings.
     if: |
-      (
+      !cancelled() && (
         needs.read-service-config.outputs.build_lane == 'java' &&
-        needs.java-build.outputs.build_result == 'success' &&
+        needs.docker-push.result == 'success' &&
+        needs.deploy.result == 'success' &&
         vars.AZURE_CLIENT_ID != '' &&
         github.actor != 'dependabot[bot]' &&
         github.event_name != 'pull_request_target' &&
@@ -1013,9 +988,12 @@ jobs:
         (github.event_name != 'pull_request' ||
          github.event.pull_request.head.repo.full_name == github.repository)
       ) || (
+        !cancelled() &&
         github.event_name == 'workflow_dispatch' &&
         inputs.force_full_pipeline == true &&
         needs.read-service-config.outputs.build_lane == 'java' &&
+        needs.docker-push.result == 'success' &&
+        needs.deploy.result == 'success' &&
         vars.AZURE_CLIENT_ID != ''
       )
     runs-on: ubuntu-latest

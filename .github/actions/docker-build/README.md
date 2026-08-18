@@ -21,16 +21,23 @@ It never runs Maven or uv itself. A single `push` input selects between two mode
 ## How It Fits
 
 ```
-java-build   (uploads build-artifacts) → docker-build (build_mode: java-artifact)
-python-build (source + uv.lock)        → docker-build (build_mode: source)
+Java Build ───────────────────────────────┐
+                                          ├─→ Container Image Validation ─→ Build & Publish
+Python Build → Python Compatibility ─────┘
 ```
 
 `validate.yml` (W5a) calls this action as two jobs:
 
-| Job | `push` | Permissions | Trust boundary |
+| Job | `push` | Permissions | Purpose |
 |-----|--------|-------------|----------------|
-| `🐳 Docker Build` | `'false'` | `contents: read` | Runs on every event, including external-fork PRs |
-| `🐳 Docker Push` | `'true'` | `packages: write` | Gated by the §5.5 `if:` clause (no `pull_request_target`, external-fork, or `dependabot[bot]`) — the gate lives on the **job**, not in this action |
+| `📦 Container Image Validation` | `'false'` | `contents: read` | Read-only amd64 build on every selected lane, including untrusted PR contexts |
+| `📤 Build & Publish Container Image` | `'true'` | `packages: write` | Trusted build of the release platform set plus GHCR publication; gated by ADR-036 |
+
+Trusted runs therefore execute two BuildKit solves. The second normally reuses the GHA
+cache, but it remains a distinct build because the jobs have different credential
+boundaries and, for Java, different platform sets (amd64 validation versus
+amd64+arm64 publication). Keeping publication in a separate job ensures untrusted PRs
+never receive `packages: write`.
 
 ## Inputs
 
