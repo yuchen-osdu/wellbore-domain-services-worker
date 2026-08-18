@@ -1,0 +1,7 @@
+remote: 
+remote: Create a pull request for 'fork_upstream' on GitHub by visiting:        
+remote:      https://github.com/yuchen-osdu/wellbore-domain-services-worker/pull/new/fork_upstream        
+remote: 
+To https://github.com/yuchen-osdu/wellbore-domain-services-worker
+ * [new branch]      fork_upstream -> fork_upstream
+branch 'fork_upstream' set up to track 'origin/fork_upstream'.

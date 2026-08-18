@@ -1,162 +1,125 @@
-# GitHub Copilot Instructions
+This is a forked repository of the OSDU project, optimized for GitHub Copilot use. 
+The following guidelines are designed to enhance clarity and efficiency in development practices, ensuring a smooth workflow for contributors.
 
-## Project Overview
+## Repository Structure
 
-You are working with the Fork Management Template, an automated solution for managing long-lived forks of upstream repositories. This template uses GitHub Actions to automate synchronization, conflict resolution, and release management for OSDU (Open Subsurface Data Universe) projects.
+* **Important Branches**:
 
-## Key Architecture
+  * `main`: Protected production (semantic releases)
+  * `fork_upstream`: Auto-sync from upstream
+  * `fork_integration`: Conflict resolution staging
 
-### Branch Strategy
-- `main` - Production branch with strict protection rules
-- `fork_upstream` - Automatically tracks upstream repository changes
-- `fork_integration` - Staging branch for conflict resolution before merging to main
+---
 
-### Core Workflows
-1. **init.yml** - Repository initialization and configuration
-2. **sync.yml** - Automated upstream synchronization with AI-enhanced PR descriptions
-3. **build.yml** - Build and test automation for Java/Maven projects
-4. **validate.yml** - PR validation, commit message checks, and conflict detection
-5. **release.yml** - Automated semantic versioning with Release Please
+## Commit Standards
 
-## Development Guidelines
+### Conventional Commit Format
 
-### Commit Messages
-Always use conventional commits format:
-```
-feat: add new feature
-fix: correct bug in sync workflow
-chore: update dependencies
-docs: improve README documentation
-feat!: breaking change to API
+Commits **must** follow the [Conventional Commits](https://www.conventionalcommits.org) standard:
+
+```text
+<type>(<scope>): <description>
+
+[optional body]
+
+[optional footer(s)]
 ```
 
-### Branch Naming
-Use the pattern: `agent/<issue-number>-<description>`
-Example: `agent/123-fix-sync-conflict`
+**Valid Types**:
 
-### Pull Requests
-- Create PRs using GitHub CLI: `gh pr create`
-- Include clear descriptions of changes
-- Reference related issues
-- Ensure all CI checks pass before merging
+* `feat`: New feature
+* `fix`: Bug fix
+* `feat!`: Breaking feature change
+* `fix!`: Breaking bug fix
+* `chore`: Maintenance (no version bump)
+* `docs`: Documentation
+* `ci`: CI/CD configuration
+* `refactor`: Code refactoring
+* `test`: Tests
 
-### Testing
-- Write behavior-driven tests, not implementation tests
-- For Java projects: use JUnit 5 and Mockito
-- Aim for 80%+ test coverage
-- Run tests locally before pushing: `mvn test`
+### Rules
 
-## Common Tasks
+* Use imperative mood ("fix bug", not "fixed")
+* No emojis or special characters
+* Lowercase type, colon, and space required (`fix: correct bug`)
+* No brackets or prefixes (e.g., `[feat]`)
 
-### Adding New Workflow Features
-1. Create workflow file in `.github/workflows/`
-2. Follow existing patterns for permissions and error handling
-3. Update documentation in `doc/` directory
-4. Add ADR if making architectural changes
+**Example**:
 
-### Modifying Sync Behavior
-1. Edit `.github/workflows/sync.yml`
-2. Test with `workflow_dispatch` before relying on schedule
-3. Consider impact on fork_integration branch
-4. Update conflict resolution logic if needed
-
-### Java/Maven Development
 ```bash
-# Build project
+feat: add login middleware
+```
+
+---
+
+## Branch Naming
+
+Descriptive naming aligned to issue tracking:
+
+```bash
+feat/issue-123-add-auth
+fix/issue-456-memory-leak
+chore/update-dependencies
+```
+
+---
+
+## Pull Request Workflow
+
+* Create PRs using `gh pr create`
+* PR title in conventional commit format
+* Reference issues clearly (e.g., `Fixes #123`)
+* Ensure all CI checks pass
+
+---
+
+## Automation Workflows
+
+| Workflow              | Purpose                                      |
+| --------------------- | -------------------------------------------- |
+| `sync.yml`            | Sync from upstream; auto-create PRs          |
+| `build.yml`           | Build/test the service (Java/Maven or Python/uv) |
+| `validate.yml`        | Commit message validation and conflict check |
+| `release.yml`         | Automate semantic version releases           |
+| `sync-template.yml`   | Update from fork templates                   |
+| `cascade.yml`         | Propagate updates to downstream forks        |
+| `cascade-monitor.yml` | Monitor update propagation                   |
+
+---
+
+## Testing Standards
+
+* Behavior-driven development (BDD)
+* Maintain 80%+ test coverage
+
+**Local Test Commands:**
+
+Java/Maven services (`pom.xml`):
+
+```bash
 mvn clean install
-
-# Run tests with coverage
-mvn clean test org.jacoco:jacoco-maven-plugin:0.8.11:report
-
-# Run specific test
-mvn test -Dtest=TestClassName#testMethodName
+mvn test
+mvn versions:display-dependency-updates
 ```
 
-### Working with Issues
-When creating issues, use appropriate labels:
-- **Type**: `bug`, `enhancement`, `documentation`
-- **Priority**: `high-priority`, `medium-priority`, `low-priority`
-- **Component**: `configuration`, `dependencies`, `workflow`
-- **AI**: Add `copilot` label for AI-suitable tasks
+Python/uv services (`pyproject.toml` + `uv.lock`):
 
-## Workflow Patterns
-
-### Standard Workflow Structure
-```yaml
-name: Workflow Name
-on:
-  schedule:
-    - cron: '0 0 * * 0'  # Weekly
-  workflow_dispatch:      # Manual trigger
-
-jobs:
-  job-name:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-      
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          
-      - name: Your Logic Here
-        run: |
-          # Implementation
-```
-
-### Error Handling
-- Always include error handling in workflows
-- Use `if: failure()` for cleanup steps
-- Report status to PRs when applicable
-- Create issues for persistent failures
-
-## Security Considerations
-
-- Never commit sensitive data or credentials
-- Use GitHub Secrets for tokens and API keys
-- Trivy scanner removes sensitive patterns automatically
-- Follow branch protection rules strictly
-
-## AI Development Tips
-
-### For GitHub Copilot
-- This project is AI-optimized with clear patterns
-- Look for `copilot` labeled issues for AI-suitable tasks
-- Follow existing code patterns for consistency
-- Reference ADRs for architectural decisions
-
-### Documentation Standards
-- Document new features in appropriate `doc/` files
-- Create ADRs for significant architecture changes
-- Use clear, descriptive variable and function names
-
-## Quick Reference
-
-### Key Files
-- `doc/src/adr/` - Architecture decisions
-- `.github/workflows/` - All automation workflows
-- `doc/product-prd.md` - Product requirements
-
-### Environment Variables
-- `UPSTREAM_OWNER` - Upstream repository owner
-- `UPSTREAM_REPO` - Upstream repository name
-- `GITHUB_TOKEN` - Authentication token
-- `OPENAI_API_KEY` - Optional for AI PR descriptions
-
-### Useful Commands
 ```bash
-# View workflow runs
-gh workflow view
-
-# Create PR
-gh pr create --title "feat: add feature" --body "Description"
-
-# Check PR status
-gh pr status
-
-# View issues
-gh issue list --label copilot
+uv sync --locked --extra dev     # never re-resolve: the lockfile is the contract
+uv run ruff check src
+uv run mypy src
+uv run pytest tests/unit
+uv run pytest tests/service --no-subprocess
+uv lock --locked                 # fails when uv.lock and pyproject.toml disagree
 ```
+
+---
+
+## MCP Integration Tools
+
+* **`check_version_tool`**: Check Maven dependency versions
+* **`check_version_batch_tool`**: Batch process Maven dependency checks
+* **`list_available_versions_tool`**: List Maven versions by minor track
+* **`scan_java_project_tool`**: Vulnerability scans with Trivy
+* **`analyze_pom_file_tool`**: Analyze Maven POM files for dependencies and vulnerabilities
 

@@ -1,0 +1,7 @@
+remote: 
+remote: Create a pull request for 'fork_integration' on GitHub by visiting:        
+remote:      https://github.com/yuchen-osdu/wellbore-domain-services-worker/pull/new/fork_integration        
+remote: 
+To https://github.com/yuchen-osdu/wellbore-domain-services-worker
+ * [new branch]      fork_integration -> fork_integration
+branch 'fork_integration' set up to track 'origin/fork_integration'.

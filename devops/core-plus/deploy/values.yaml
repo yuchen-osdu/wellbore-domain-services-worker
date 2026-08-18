@@ -1,0 +1,22 @@
+global:
+  domain: ""
+  limitsEnabled: true
+  dataPartitionId: "osdu"
+
+data:
+  # Configmaps
+  openapiPrefix: "/api/wdms-worker"
+  # Deployments
+  requestsCpu: "5m"
+  requestsMemory: "350Mi"
+  limitsCpu: "1"
+  limitsMemory: "1G"
+  image: ""
+  imagePullPolicy: "IfNotPresent"
+  serviceAccountName: "wellbore-worker"
+
+conf:
+  configmap: "wellbore-worker-config"
+  appName: "wellbore-worker"
+  s3SecretName: "wellbore-seaweedfs-secret"
+  replicas: 1

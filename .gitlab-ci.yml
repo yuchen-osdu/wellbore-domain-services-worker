@@ -1,0 +1,180 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+variables:
+  AZURE_TEST_TYPE: "python"
+  AZURE_SERVICE: "wellbore-domain-services-worker"
+  AZURE_DEPLOYMENTS_SUBDIR: devops/azure
+  AZURE_CLIENT_ID: $AZURE_PRINCIPAL_ID
+  AZURE_CLIENT_SECRET: $AZURE_PRINCIPAL_SECRET
+  AZURE_DATA_PARTITION: opendes
+  AZURE_AD_APP_RESOURCE_ID: $AZURE_APP_ID
+  KEYVAULT_URI: $KEYVAULT_URI
+  AZURE_APP_CLIENT_SECRET: $AZURE_APP_CLIENT_SECRET
+  STORAGE_ACCOUNT_NAME: $STORAGE_ACCOUNT_NAME
+  AZURE_SKIP_TEST: "true"
+
+  AWS_BUILD_SUBDIR: provider/os-wellbore-ddms-worker-aws/build-aws
+  AWS_EKS_DEPLOYMENT_NAME: os-wellbore-ddms-worker
+  AWS_SERVICE_NAMESPACE_SUFFIX: wellbore-ddms
+  AWS_SERVICE: wellbore-ddms-worker
+  AWS_DEPLOY_TARGET: TF
+
+  PYTHON_IMAGE: "python:3.13-slim"
+
+include:
+  - project: "osdu/platform/ci-cd-pipelines"
+    file: "standard-setup.yml"
+
+  - project: "osdu/platform/ci-cd-pipelines"
+    file: "cloud-providers/azure.yml"
+  - local: "/devops/azure/override-stages.yml"
+
+  - project: "osdu/platform/ci-cd-pipelines"
+    file: "cloud-providers/gc-global.yml"
+  - local: "devops/gc/pipeline/override-stages.yml"
+
+  - project: "osdu/platform/ci-cd-pipelines"
+    file: "cloud-providers/cimpl-global.yml"
+
+  - local: "devops/core-plus/pipeline/override-stages.yml"
+
+  - project: "osdu/platform/ci-cd-pipelines"
+    file: "cloud-providers/aws-global.yml"
+
+  - project: "osdu/platform/domain-data-mgmt-services/wellbore/lib/lib-registry"
+    file: "registry-setup.yml"
+
+.default:
+  script:
+    # uv.lock (resolved from pyproject.toml) is the source of truth. Install the
+    # locked dev + aws environment and activate it for the job's commands.
+    - python -m pip install --upgrade pip "uv==0.11.19"
+    - uv sync --locked --extra dev --extra aws
+    - . .venv/bin/activate
+
+stages:
+  - linting
+  - testing
+  - review
+  - build
+  - coverage
+  - containerize
+  - scan
+  - deploy
+  - bootstrap
+  - integration
+  - acceptance
+  - performance-testing
+  - publish
+  - deploy_preship
+
+linters-check:
+  image: $PYTHON_IMAGE
+  tags: ["osdu-small"]
+  stage: linting
+  script:
+    - !reference [.default, script]
+    - ruff check ./src
+    - ruff format --check .
+    - mypy ./src
+
+verify-uv-lock-and-requirements:
+  # Use a full image (not -slim) because this job needs `git` for the drift check.
+  image: python:3.13-bookworm
+  tags: ["osdu-small"]
+  stage: linting
+  script:
+    # uv.lock is the source of truth; requirements*.txt are generated exports.
+    - python -m pip install --upgrade pip "uv==0.11.19"
+    # fail if uv.lock is out of date with pyproject.toml
+    - uv lock --locked
+    # regenerate the exported requirements files from the lock
+    - ./scripts/regenerate-requirements.sh
+    # fail if the committed lock or exports drifted from what was regenerated
+    - git diff --exit-code uv.lock requirements.txt requirements_dev.txt
+  artifacts:
+    when: always
+    paths:
+      - "uv.lock"
+      - "requirements*.txt"
+    expire_in: 2 days
+
+unit-tests:
+  image: $PYTHON_IMAGE
+  tags: ["osdu-medium"]
+  stage: testing
+  script:
+    - !reference [.default, script]
+    - coverage run -m pytest ./tests/unit --junitxml=report.xml
+    - coverage report
+    - coverage xml
+  coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
+  artifacts:
+    when: always
+    reports:
+      junit: report.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+
+service-tests:
+  image: $PYTHON_IMAGE
+  tags: ["osdu-medium"]
+  stage: testing
+  script:
+    - !reference [.default, script]
+    - coverage run -m pytest ./tests/service --junitxml=report.xml
+    - coverage report
+    - coverage xml
+  coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
+  artifacts:
+    when: always
+    reports:
+      junit: report.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+
+deploylib:
+  image: $PYTHON_IMAGE
+  tags: ["osdu-medium"]
+  stage: deploy
+  allow_failure: true
+  script:
+    - python3 -m pip install --upgrade pip build twine
+    - python3 -m build
+    - TWINE_PASSWORD=${CI_JOB_TOKEN} TWINE_USERNAME=${CI_REGISTRY_USER} python -m twine upload --repository-url ${CI_API_V4_URL}/projects/${WDMS_LIB_REGISTRY}/packages/pypi dist/*
+  rules:
+    - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
+      when: on_success
+
+trigger-trusted-tests:
+  image: $CI_REGISTRY/osdu/platform/trusted-mr-container
+  before_script:
+    - echo "overriding before script"
+
+trusted-merge-branch-verification:
+  image: $CI_REGISTRY/osdu/platform/trusted-mr-container
+  before_script:
+    - echo "overriding before script"
+
+aws-containerize:
+  needs: []
+  allow_failure: true
+
+aws-update-tf:
+  allow_failure: true
+
+gc-helm-charts-gitlab:
+  allow_failure: true
+

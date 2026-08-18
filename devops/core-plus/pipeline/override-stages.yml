@@ -1,0 +1,33 @@
+variables:
+  CIMPL_SERVICE: wellbore-worker
+  CIMPL_INT_TEST_TYPE: python
+  CIMPL_SUPPORTED_PLATFORM: "linux/amd64"
+  CIMPL_OPENAPI_YAML_ROUTE: "/api/wdms-worker/openapi.json"
+
+cimpl-containerize-gitlab:
+  needs: []
+  variables:
+    CIMPL_BUILD_PATH: "./devops/core-plus/Dockerfile"
+
+cimpl-containerize-bootstrap-gitlab:
+  needs: []
+
+cimpl-deploy:
+  before_script:
+    - echo "Deploying a new App version..."
+
+cimpl-test-python:
+  rules:
+    - exists:
+        - never/existing/file.txt
+
+#dev2 jobs
+
+cimpl-dev2-deploy:
+  before_script:
+    - echo "Deploying a new App version..."
+    
+cimpl-dev2-test-python:
+  rules:
+    - exists:
+        - never/existing/file.txt

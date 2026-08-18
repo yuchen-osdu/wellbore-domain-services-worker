@@ -1,0 +1,74 @@
+# Copyright 2023 Schlumberger
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+{{$nameSuffix := include "os-wellbore-ddms-worker.name-suffix" .}}
+{{- if .Values.isAutoscalingEnabled }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  annotations:
+{{ include "os-wellbore-ddms-worker.commonAnnotations" . | indent 4}}
+  labels:
+{{ include "os-wellbore-ddms-worker.commonLabels" . | indent 4}}
+  name: {{ .Values.deployment.name }}{{ $nameSuffix }}
+{{ include "os-wellbore-ddms-worker.namespace" . | indent 2}}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ .Values.deployment.name }}{{ $nameSuffix }}
+  pollingInterval: 30
+  cooldownPeriod: 30
+  minReplicaCount: {{ .Values.minReplicaCount }}
+  maxReplicaCount: {{ .Values.maxReplicaCount }}
+  triggers:
+  - type: azure-log-analytics
+    metadata:
+      workspaceIdFromEnv: WORKSPACE_ID
+      clientIdFromEnv: CLIENT_ID
+      tenantIdFromEnv: TENANT_ID
+      clientSecretFromEnv: CLIENT_SECRET
+      query: |
+        let ServiceName = "{{ .Values.kedaconfig.servicepath }}{{ $nameSuffix }}/";
+        let AvgDuration = ago({{ .Values.kedaconfig.duration }});
+        let ThresholdCoefficient = {{ .Values.kedaconfig.thresholdcoefficient }};
+        AzureDiagnostics 
+        | where Category == "ApplicationGatewayAccessLog" and requestUri_s hasprefix_cs ServiceName and requestUri_s hassuffix_cs "/data"
+        | where TimeGenerated > AvgDuration
+        | summarize MetricValue = count()
+        | project MetricValue, Threshold = MetricValue * ThresholdCoefficient    
+      threshold: "{{ .Values.kedaconfig.threshold }}"
+  - type: cpu
+    metricType: "{{ .Values.kedaconfig.metricType }}"
+    metadata:
+      value: "{{ .Values.kedaconfig.utilization.cpu }}"
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          policies:
+          - type: Pods
+            value: 1
+            periodSeconds: 30
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          selectPolicy: Max
+          policies:
+          - type: Pods
+            value: 2
+            periodSeconds: 30
+          - type: Percent
+            value: 20
+            periodSeconds: 30
+{{- end }}

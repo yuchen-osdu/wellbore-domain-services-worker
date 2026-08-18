@@ -1,0 +1,53 @@
+global:
+  domain: ""
+  limitsEnabled: true
+  tier: ""
+  autoscalingMode: "cpu"
+  logLevel: "ERROR"
+
+data:
+  # Configmaps
+  openapiPrefix: "/api/wdms-worker"
+  # Deployments
+  requestsCpu: "40m"
+  requestsMemory: "350Mi"
+  limitsCpu: "1"
+  limitsMemory: "1G"
+  gcImage: "community.opengroup.org:5555/osdu/platform/domain-data-mgmt-services/wellbore/wellbore-domain-services-worker/gc-wellbore-worker-master:latest"
+  imagePullPolicy: "IfNotPresent"
+  serviceAccountName: "wellbore-worker"
+  logLevel: ""
+  affinityLabelsSpot:
+    cloud.google.com/gke-provisioning:
+      - spot
+
+conf:
+  configmap: "wellbore-worker-config"
+  appName: "wellbore-worker"
+  minioSecretName: "wellbore-minio-secret"
+
+hpa:
+  minReplicas: 1
+  maxReplicas: 6
+  cpu:
+    utilization: 200
+    scaleUpStabilizationWindowSeconds: 30
+    scaleUpValue: 200
+    scaleUpPeriod: 15
+    scaleDownStabilizationWindowSeconds: 150
+    scaleDownValue: 100
+    scaleDownPeriod: 15
+  requests:
+    targetType: "AverageValue"
+    targetValue: 86
+    scaleUpStabilizationWindowSeconds: 10
+    scaleUpValue: 50
+    scaleUpPeriod: 15
+    scaleDownStabilizationWindowSeconds: 60
+    scaleDownValue: 25
+    scaleDownPeriod: 60
+
+limits:
+  maxTokens: 50
+  tokensPerFill: 50
+  fillInterval: "1s"

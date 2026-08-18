@@ -1,0 +1,804 @@
+openapi: 3.1.0
+info:
+  title: Wellbore domain services worker
+  version: 0.3.0
+paths:
+  /about:
+    get:
+      summary: About Route
+      operationId: about_route_about_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /data/{record_id}/session/{session_id}:
+    post:
+      summary: Post Bulk Chunk In Session Route
+      operationId: post_bulk_chunk_in_session_route_data__record_id__session__session_id__post
+      parameters:
+      - name: record_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Record Id
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      - name: reference
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: name of the reference curve if any
+          title: Reference
+        description: name of the reference curve if any
+      - name: Content-Type
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Content-Type
+      - name: data-partition-id
+        in: header
+        required: true
+        schema:
+          type: string
+          title: Data-Partition-Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataframeBasicDescribe'
+        '422':
+          description: invalid content
+        '413':
+          description: the content size exceeds the limit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LimitExceededErrorResponse'
+    patch:
+      summary: Session Complete Route
+      operationId: session_complete_route_data__record_id__session__session_id__patch
+      parameters:
+      - name: record_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Record Id
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      - name: completion
+        in: query
+        required: true
+        schema:
+          $ref: '#/components/schemas/SessionCompletionMode'
+      - name: reference
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: name of the reference curve if any
+          title: Reference
+        description: name of the reference curve if any
+      - name: from_bulk
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: previous bulk id for commit update
+          title: From Bulk
+        description: previous bulk id for commit update
+      - name: data-partition-id
+        in: header
+        required: true
+        schema:
+          type: string
+          title: Data-Partition-Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /data/{record_id}:
+    post:
+      summary: Post Bulk Data Route
+      operationId: post_bulk_data_route_data__record_id__post
+      parameters:
+      - name: record_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Record Id
+      - name: reference
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: name of the reference curve if any
+          title: Reference
+        description: name of the reference curve if any
+      - name: Content-Type
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Content-Type
+      - name: data-partition-id
+        in: header
+        required: true
+        schema:
+          type: string
+          title: Data-Partition-Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WriteBulkResponse'
+        '400':
+          description: bad request
+        '404':
+          description: resource not found
+        '422':
+          description: invalid content
+        '413':
+          description: the content size exceeds the limit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LimitExceededErrorResponse'
+  /data/{record_id}/{bulk_id}:
+    get:
+      summary: Get Bulk Route
+      operationId: get_bulk_route_data__record_id___bulk_id__get
+      parameters:
+      - name: record_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Record Id
+      - name: bulk_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Bulk Id
+      - name: offset
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+            minimum: 0
+          - type: 'null'
+          title: Offset
+      - name: limit
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+            minimum: 1
+          - type: 'null'
+          title: Limit
+      - name: curves
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Curves
+      - name: describe
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          default: false
+          title: Describe
+      - name: filter
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              type: string
+          - type: 'null'
+          title: Filter
+      - name: orient
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/JSONOrient'
+          description: format for JSON only.
+          default: split
+        description: format for JSON only.
+      - name: Accept
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Accept
+      - name: data-partition-id
+        in: header
+        required: true
+        schema:
+          type: string
+          title: Data-Partition-Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '400':
+          description: bad request
+        '404':
+          description: resource not found
+        '412':
+          description: not supported data format
+        '413':
+          description: the resource requested exceeds the limit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TooLargeReadErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /data/{record_id}/{bulk_id}/statistics:
+    post:
+      summary: Trigger computations of record's data statistics of record's data
+      description: "Trigger the computation of statistics on bulk data for the record\
+        \ identified by the record_id\n     at its bulk id.\n\n    No unit conversion\
+        \ is supported. Statistics will be returned using the same units as recorded\
+        \ in Curves[].CurveUnit"
+      operationId: compute_bulk_statistics_data__record_id___bulk_id__statistics_post
+      parameters:
+      - name: record_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Record Id
+      - name: bulk_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Bulk Id
+      - name: record_version
+        in: query
+        required: true
+        schema:
+          type: integer
+          title: Record Version
+      - name: data-partition-id
+        in: header
+        required: true
+        schema:
+          type: string
+          title: Data-Partition-Id
+      responses:
+        '200':
+          description: Statistics computation started
+          content:
+            application/json:
+              schema: {}
+        '404':
+          description: Statistics or record not found
+        '409':
+          description: Statistics computation already running or complete
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      summary: Returns statistics of record's data for selected curves at requested
+        version
+      description: "Returns the statistics on bulk data identified by the record and\
+        \ given version.\n    \nIf wanted curves is an array:\n* requests \"ARRAY\"\
+        \ retrieves all dimensions of the array\n* requests \"ARRAY[M:N]\", retrieves\
+        \ all dimensions between M and N.\n\n\n    \nData types supported:\n* int\n\
+        * float\n* date\n\n\n    No unit conversion is supported. Statistics will\
+        \ be returned using the same units as recorded in Curves[].CurveUnit"
+      operationId: get_bulk_statistics_version_data__record_id___bulk_id__statistics_get
+      parameters:
+      - name: record_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Record Id
+      - name: bulk_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Bulk Id
+      - name: curves_selection
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              type: string
+          - type: 'null'
+          title: Curves Selection
+      - name: data-partition-id
+        in: header
+        required: true
+        schema:
+          type: string
+          title: Data-Partition-Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkDataStatisticsResponse'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              examples:
+                default:
+                  summary: Record not found
+                  value:
+                    detail: Record not found
+                data-not-found:
+                  summary: Statistics data not found
+                  value:
+                    errorType: DATA_NOT_FOUND
+                    message: Statistics do not exist
+                stats-curves-error:
+                  summary: Requested curves unknown
+                  value:
+                    errorType: CURVES_NOT_FOUND
+                    message: Requested curves unknown
+                stats-computation-error:
+                  summary: Computation still running
+                  value:
+                    errorType: COMPUTATION_NOT_COMPLETE
+                    message: Statistics computation not finished yet
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+components:
+  schemas:
+    BulkDataStatisticsResponse:
+      properties:
+        computationStartDatetime:
+          type: string
+          format: date-time
+          title: Statistics computation start datetime in ISO format
+        recordId:
+          type: string
+          title: Recordid
+        recordVersion:
+          type: integer
+          title: Recordversion
+        computationStatus:
+          $ref: '#/components/schemas/BulkStatisticsStatus'
+        data:
+          additionalProperties:
+            $ref: '#/components/schemas/CurveStatistics'
+          type: object
+          title: Curves statistics' values
+          examples:
+          - CurveName:
+              10%: '9.0'
+              50%: '451.0'
+              90%: '893.0'
+              max: '999.0'
+              mean: '450.8438'
+              min: '-100.0'
+              nonAbsentValuesCount: '100000.0'
+              std: '318.27778186518816'
+              totalCount: '100000'
+      type: object
+      required:
+      - computationStartDatetime
+      - recordId
+      - recordVersion
+      - computationStatus
+      - data
+      title: BulkDataStatisticsResponse
+      description: Response for bulk data statistics and its meta-data
+      example:
+        computationStartDatetime: '2022-05-18T16:22:16.010582'
+        computationStatus: complete
+        data:
+          ARR[0]:
+            10%: '9.0'
+            50%: '451.0'
+            90%: '893.0'
+            max: '999.0'
+            mean: '450.8438'
+            min: '-100.0'
+            nonAbsentValuesCount: '100000.0'
+            std: '318.27778186518816'
+            totalCount: '100000'
+          ARR[1]:
+            10%: '10.0'
+            50%: '446.0'
+            90%: '889.0'
+            max: '999.0'
+            mean: '448.06855'
+            min: '-100.0'
+            nonAbsentValuesCount: '100000.0'
+            std: '316.8023859891449'
+            totalCount: '100000'
+          ARR[2]:
+            10%: '11.0'
+            50%: '453.0'
+            90%: '890.0'
+            max: '999.0'
+            mean: '451.01309'
+            min: '-100.0'
+            nonAbsentValuesCount: '100000.0'
+            std: '317.40833668820653'
+            totalCount: '100000'
+          ARR[3]:
+            10%: '8.900000000001455'
+            50%: '450.0'
+            90%: '890.0'
+            max: '999.0'
+            mean: '449.16661'
+            min: '-100.0'
+            nonAbsentValuesCount: '100000.0'
+            std: '317.7767589547625'
+            totalCount: '100000'
+        recordId: osdu:work-product-component--WellLog:6d9c95c972254bbbaeaecbfa67fd1cf3
+        recordVersion: '1998222529528913770053504387865218642'
+    BulkStatisticsStatus:
+      type: string
+      enum:
+      - error
+      - started
+      - running
+      - complete
+      title: BulkStatisticsStatus
+      description: Status available for computation of bulk data statistics
+    ColumnDescribe:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: name of the column, if index them set to '_wdms_index_'
+        startEnd:
+          additionalProperties: true
+          type: object
+          title: Startend
+          description: Simplified dataframe contains only the first and last row,
+            with the reference column if requested.See https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.to_dict.html
+            `split` orient.Dataframe can simply be constructed directly using dataframe
+            constructor as it.
+        monotonicity:
+          anyOf:
+          - $ref: '#/components/schemas/Monotonicity'
+          - type: 'null'
+          description: If not None, data are monotonic increasing or decreasing
+        hasDuplicate:
+          type: boolean
+          title: Hasduplicate
+          description: boolean if the column contains any duplicated values
+          default: false
+        hasNan:
+          type: boolean
+          title: Hasnan
+          description: boolean if there are any NaNs
+          default: false
+        dataType:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Datatype
+          description: data type of the values, e.g. 'float64'
+      type: object
+      required:
+      - name
+      - startEnd
+      title: ColumnDescribe
+      description: "information on a single column containing the following information:\n\
+        \    - name: name or label of the column. If the column refers to the index,\
+        \ name with set to \"_wdms_index_\"\n    - monotonicity: if set to `None`,\
+        \ the values are not monotonic. Set to `increasing` if monotonic increasing,\n\
+        \                    to `decreasing if monotonic decreasing. By convention\
+        \ and backward compatibility, set to\n                    `increasing` in\
+        \ case of empty dataframe.\n    - hasDuplicate: flag if values are not unique.\n\
+        \    - hasNan: flag if values contains at least one missing value.\n    -\
+        \ dataType: data type of the values as string, e.g. `int64`. Set to `None`\
+        \ if dataframe is empty\n    - startEnd: dataframe serialized as dict/json\
+        \ which contains only the associated column with only its first and\n    \
+        \            last rows with index preserved. Pandas dataframe can be directly\
+        \ constructed from this dict.\n                In some cases, it could contains\
+        \ a single row or be empty if original dataframe contains a single\n     \
+        \           row or is empty."
+    CurveStatistics:
+      properties:
+        mean:
+          type: string
+          title: Mean value
+        std:
+          type: string
+          title: Standard deviation value
+        min:
+          type: string
+          title: Minimum value
+        10%:
+          type: string
+          title: 10th percentiles
+        50%:
+          type: string
+          title: 50th percentiles
+        90%:
+          type: string
+          title: 90th percentiles
+        max:
+          type: string
+          title: Maximum value
+        totalCount:
+          type: string
+          title: Number of values in the curve
+        nonAbsentValuesCount:
+          type: string
+          title: Number of valid values in the curve
+      type: object
+      required:
+      - mean
+      - std
+      - min
+      - 10%
+      - 50%
+      - 90%
+      - max
+      - totalCount
+      - nonAbsentValuesCount
+      title: CurveStatistics
+    DataframeBasicDescribe:
+      properties:
+        rowCount:
+          type: integer
+          title: Rowcount
+        curves:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Curves
+          description: ' dictionary curve name to number of columns '
+        reference:
+          anyOf:
+          - $ref: '#/components/schemas/ColumnDescribe'
+          - type: 'null'
+          description: details about the reference upon request. If no reference applicable
+            index will be described instead using name '_wdms_index_'
+      type: object
+      required:
+      - rowCount
+      - curves
+      - reference
+      title: DataframeBasicDescribe
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    JSONOrient:
+      type: string
+      enum:
+      - split
+      - columns
+      title: JSONOrient
+    LimitExceededErrorResponse:
+      properties:
+        errorType:
+          type: string
+          title: Errortype
+          default: LIMIT_EXCEEDED
+        message:
+          type: string
+          title: Message
+          description: error message
+        actual:
+          type: integer
+          title: Actual
+          description: actual value that exceeds the limit
+        limit:
+          type: integer
+          title: Limit
+          description: limit allowed
+      type: object
+      required:
+      - message
+      - actual
+      - limit
+      title: LimitExceededErrorResponse
+      description: Generic error with type response when a limit is exceeded
+    Monotonicity:
+      type: string
+      enum:
+      - increasing
+      - decreasing
+      title: Monotonicity
+    ReadLimits:
+      properties:
+        values:
+          type: integer
+          title: Values
+          default: 10000000
+        columns:
+          type: integer
+          title: Columns
+          default: 3000
+      type: object
+      title: ReadLimits
+    ReadPartition:
+      properties:
+        curves:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Curves
+      type: object
+      required:
+      - curves
+      title: ReadPartition
+      description: Read parameters matching bulk partitions
+    SessionCompletionMode:
+      type: string
+      enum:
+      - abandon
+      - overwrite
+      - update
+      title: SessionCompletionMode
+    TooLargeReadErrorBulkDescription:
+      properties:
+        totalNumberOfRows:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Totalnumberofrows
+          description: total number of row of the record bulk data
+        totalNumberOfColumns:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Totalnumberofcolumns
+          description: total number of column of the record bulk data
+        partitions:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/ReadPartition'
+            type: array
+          - type: 'null'
+          title: Partitions
+          description: List of read parameters matching partitions. Meant be used
+            as it for efficient read.
+      type: object
+      title: TooLargeReadErrorBulkDescription
+    TooLargeReadErrorResponse:
+      properties:
+        errorType:
+          type: string
+          const: READ_REQUEST_TOO_LARGE
+          title: Errortype
+          default: READ_REQUEST_TOO_LARGE
+        message:
+          type: string
+          title: Message
+          description: error message
+        limits:
+          $ref: '#/components/schemas/ReadLimits'
+          description: limits for reading data per request
+          default:
+            values: 10000000
+            columns: 3000
+        bulkDescription:
+          anyOf:
+          - $ref: '#/components/schemas/TooLargeReadErrorBulkDescription'
+          - type: 'null'
+      type: object
+      required:
+      - message
+      title: TooLargeReadErrorResponse
+      description: Error with type response in case on read requesting that involves
+        too much data to fetch
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+    WriteBulkResponse:
+      properties:
+        bulkid:
+          type: string
+          title: Bulkid
+        describe:
+          $ref: '#/components/schemas/DataframeBasicDescribe'
+      type: object
+      required:
+      - bulkid
+      - describe
+      title: WriteBulkResponse
+      description: Write response on post data with no session
+servers:
+- url: /api/wdms-worker

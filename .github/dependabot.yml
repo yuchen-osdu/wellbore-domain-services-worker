@@ -1,64 +1,55 @@
 version: 2
 updates:
-  # ========================================================================
-  # TEMPLATE REPOSITORY CONFIGURATION
-  # ========================================================================
-  # This configuration is for the TEMPLATE repository (azure/osdu-spi)
-  # which serves as the engineering system/platform.
+  # Python (uv) Dependencies - Application Code
+  # Workflow and GitHub Actions updates are managed via template synchronization
   #
-  # ARCHITECTURE DECISION:
-  # - Template owns: Engineering system (.github workflows and actions)
-  # - Forks own: Application code (Maven dependencies)
-  # - Updates flow: Template → sync-template → Forks
+  # Strategy (mirrors the Java/Maven fork policy):
+  # - PATCHES ONLY: Major and minor updates are ignored for stability
+  # - GROUPED: Azure SDK, FastAPI/Starlette/Pydantic, and OpenTelemetry patches are grouped
+  # - INDIVIDUAL: All other patches get individual PRs
+  # - EXCLUDED: Lint/type/test tooling is ignored entirely (owned by the service, not Dependabot)
   #
-  # Fork repositories receive .github updates via sync-template workflow,
-  # NOT via their own dependabot. This eliminates race conditions and
-  # duplicate PRs while maintaining clear separation of concerns.
-  # ========================================================================
+  # Dependabot resolves the same uv.lock the build and the canonical image install, so a
+  # merged PR updates CI and the container image together.
+  #
+  # Private OSDU package index: if the service index requires authentication, an
+  # organization or repository Dependabot secret must be added and referenced here as a
+  # `registries:` entry (python-index). Do not add the entry before the secret exists —
+  # an unresolvable registry reference invalidates the whole configuration file.
 
-  # GitHub Actions - Engineering System (Template Responsibility)
-  # Monitors ALL .github subdirectories recursively for workflow/action updates
-  # Includes: workflows/, template-workflows/, actions/, local-actions/
-  - package-ecosystem: "github-actions"
-    directory: "/.github"
+  - package-ecosystem: "uv"
+    directory: "/"
     schedule:
       interval: "daily"
-      time: "08:00"
+      time: "09:00"
     target-branch: "main"
     labels:
       - "dependencies"
-    groups:
-      github-actions:
-        patterns:
-          - "*"
+    ignore:
+      # Only allow patch updates for stability
+      - dependency-name: "*"
         update-types:
-          - "minor"
-          - "patch"
-    open-pull-requests-limit: 5
-
-  # Docker base images - Canonical service Dockerfiles (Engineering System, ADR-037)
-  # Template-only: bumps the digests pinned in build/Dockerfile (Java) and
-  # build/python/Dockerfile (Python/uv); template-sync then propagates the updated
-  # Dockerfiles to every fork. Forks carry no docker ecosystem, so they never author their
-  # own base-image bump. The App Insights agent (ADD --checksum) is not a FROM ref, so
-  # Dependabot does not track it — agent version bumps stay manual.
-  - package-ecosystem: "docker"
-    directories:
-      - "/build"
-      - "/build/python"
-    schedule:
-      interval: "daily"
-      time: "08:30"
-    target-branch: "main"
-    labels:
-      - "dependencies"
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+      # Ignore build/lint/type/test tooling entirely
+      - dependency-name: "ruff"
+      - dependency-name: "mypy"
+      - dependency-name: "pytest"
+      - dependency-name: "pytest-*"
+      - dependency-name: "coverage"
+      - dependency-name: "setuptools"
+      - dependency-name: "uv"
     groups:
-      docker:
+      azure:
         patterns:
-          - "*"
-    open-pull-requests-limit: 5
-
-  # Python/doc dependencies removed to prevent fork initialization issues
-  # Issue: Forks inherit this config momentarily before deploy-fork-resources.sh runs,
-  # causing Dependabot to cache the pip/doc ecosystem even after replacement
-  # Template documentation updates can be monitored separately if needed
+          - "azure-*"
+          - "msal*"
+      fastapi:
+        patterns:
+          - "fastapi*"
+          - "starlette*"
+          - "pydantic*"
+          - "uvicorn*"
+      opentelemetry:
+        patterns:
+          - "opentelemetry-*"

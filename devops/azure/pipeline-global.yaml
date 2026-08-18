@@ -1,0 +1,76 @@
+# Copyright 2023 Schlumberger
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# temporary basic pipeline
+
+name: $(Date:yyMMdd)$(Rev:rr) # expected only number, used in version for not master branches
+
+pool:
+  vmImage: ubuntu-latest
+
+parameters:
+- name: uploadDevPkg
+  type: boolean
+  default: false
+  displayName: generate dev package (not master)
+
+variables:
+- name: feed-name
+  value: ''
+- name: isPullRequest
+  value: $[eq(variables['Build.Reason'], 'PullRequest')]
+- name: isDevPkgRequested
+  value: ${{ parameters.uploadDevPkg }}
+# build dev package only for other branch than master and if option 'uploadDevPkg' checked
+- name: buildDevPkg
+  value: $[eq(variables['isDevPkgRequested'], true)]
+# upload the package if master or if buildDevPkg
+- name: uploadPkg
+  value: $[eq(variables['buildDevPkg'], true)]
+
+jobs:
+  - job: linters_python_3_10
+    steps:
+        - template: steps-linters.yaml
+          parameters:
+            python_version: '3.10'
+  - job: unit_tests_python_3_10
+    dependsOn: linters_python_3_10
+    condition: succeeded()
+    steps:
+    - template: steps-unit-tests.yaml
+      parameters:
+        python_version: '3.10'
+  - job: unit_tests_python_3_11
+    dependsOn: linters_python_3_10
+    condition: succeeded()
+    steps:
+    - template: steps-unit-tests.yaml
+      parameters:
+        python_version: '3.11'
+  - job: packaging_python_3_11
+    dependsOn: unit_tests_python_3_11
+    condition: succeeded()
+    steps:
+    - template: steps-package.yaml
+      parameters:
+        python_version: '3.11'
+        uploadDevPkg: ${{ parameters.uploadDevPkg }}
+  - job: docker_build
+    dependsOn: unit_tests_python_3_11
+    condition: succeeded()
+    steps:
+      - bash: |
+          docker build -f deployment/wdms-worker.DockerFile -t wdms-worker .
+        displayName: 'Docker build'

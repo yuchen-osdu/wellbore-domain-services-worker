@@ -1,0 +1,135 @@
+[build-system]
+requires = ["setuptools >= 80.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "osdu-wbddms-worker"
+authors = [{name = "WDMS team"}]
+description = "WDMS bulk worker service."
+readme = "README.md"
+license = {file = "LICENSE"}
+keywords = ["python", "wdms", "bulk"]
+requires-python = ">=3.12"
+version = "0.3.0"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    "pandas~=2.3.2",
+    "numpy",
+    "pyarrow>=24.0.0",
+    "natsort",
+    "fastapi>=0.121.0",
+    "starlette>=1.0.1",
+    "urllib3>=2.7.0",
+    "httpcore",
+    "uvicorn",
+    "opentelemetry-api==1.40.0",
+    "opentelemetry-sdk==1.40.0",
+    "opentelemetry-semantic-conventions",
+    "requests>=2.32.3",
+    "osdu-core-lib-python==0.29.0",
+    "pydantic>=2.11.3",
+]
+
+[project.urls]
+Home = "https://community.opengroup.org/osdu/platform/domain-data-mgmt-services/wellbore/wellbore-domain-services-worker"
+
+[project.optional-dependencies]
+dev = [
+    "anyio>=4.4.0",  # major 4 introduced breaking changes on exception management on task group
+    "pytest",
+    "pytest-cov",
+    "pytest-randomly",
+    "pytest-asyncio",
+    "requests",  # based http client for the service tests
+    "httpx",  # used by FastAPI/starlette TestClient
+    "fsspec",  # local blob storage
+    "certifi>=2024.7.4",
+    "cryptography>=48.0.1",
+    "tenacity>=9.1.2",
+    "asgi_lifespan",
+    "ruff",  # linting (ruff check) and formatting (ruff format)
+    "mypy",  # typing check
+    "pre-commit", # for adding git pre-commit hook to run ruff and mypy automatically
+    "types-requests", # for mypy support for requests
+]
+
+# cloud provider specific dependencies
+az = [
+    "azure-monitor-opentelemetry-exporter>=1.0.0b46",
+    "osdu-core-lib-python-azure==0.29.0",
+    "aiohttp>=3.9.5",
+    "msal>=1.24.1 "
+]
+
+aws = [
+    "boto3",
+    "botocore",
+    "osdu-core-lib-python-aws==0.29.0",
+    "opentelemetry-exporter-otlp-proto-http==1.40.0",
+]
+
+ibm = [
+    "aiohttp>=3.8.0",
+    "osdu-core-lib-python-ibm==0.29.0",
+]
+
+gc = [
+    "osdu-core-lib-python-gcp==0.29.0",
+    "opentelemetry-exporter-gcp-trace",
+    "aiohttp>=3.9.5",
+]
+
+baremetal = [
+    "aiohttp>=3.9.1",
+    "boto3",
+    "botocore",
+    "requests",
+    "osdu-api>=1.2.0",
+    "osdu-core-lib-python-baremetal==0.29.0"
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "perf: performance test, usually slow test"
+]
+#addopts = "--p no:randomly"  # uncomment to disable random order testing
+
+[tool.mypy]
+ignore_missing_imports = "True"
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+src = ["src"]
+extend-exclude = [".venv", "venv", "build", "dist", ".eggs"]
+
+[tool.ruff.lint]
+# Keep parity with the previous flake8 configuration.
+ignore = [
+    "E203",  # whitespace before ':' - conflicts with the formatter
+    "E501",  # line length is enforced by the formatter (line-length = 120)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]  # allow unused imports in package __init__.py
+
+[tool.uv]
+# Match pip's `--extra-index-url` merge behaviour: consider every configured
+# index and pick the best version, instead of uv's default "first-index" which
+# would pin older packages mirrored on the OSDU private index.
+index-strategy = "unsafe-best-match"
+
+[[tool.uv.index]]
+url = "https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple/"
