@@ -196,8 +196,8 @@ jobs:
           generate_coverage: ${{ needs.read-service-config.outputs.has_coverage }}
 
   python-compatibility:
-    name: "🐍 Python ${{ matrix.version || 'No-op' }} Compatibility"
-    needs: [check-repo-state, read-service-config]
+    name: "🐍 Python Compatibility"
+    needs: [check-repo-state, read-service-config, python-build]
     if: needs.check-repo-state.outputs.initialized == 'true' && needs.read-service-config.outputs.build_lane == 'python'
     runs-on: ubuntu-latest
     strategy:

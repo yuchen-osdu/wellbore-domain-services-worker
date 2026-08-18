@@ -64,13 +64,16 @@ export GH_TOKEN
 # do NOT gate deploy; only the genuinely-required deploy/test inputs do.
 deploy_ready() {
   local ready=true name
-  local secret_names variable_names
-  secret_names="$(gh api --paginate "repos/${REPO_FULL_NAME}/actions/secrets" --jq '.secrets[].name' 2>/dev/null || echo "")"
+  local variable_names
   local variables_json no_data_token_env
   variables_json="$(gh api --paginate --slurp "repos/${REPO_FULL_NAME}/actions/variables?per_page=100" 2>/dev/null || echo '[{"variables":[]}]')"
   variable_names="$(jq -r '.[].variables[].name' <<< "$variables_json")"
   no_data_token_env="$(jq -r '[.[].variables[] | select(.name == "NO_DATA_ACCESS_TOKEN_ENV") | .value][0] // ""' <<< "$variables_json")"
-  grep -qx "AZURE_CLIENT_ID" <<< "$secret_names" || ready=false
+  # `spi onboard` writes the deploy identity as both an encrypted secret and this
+  # non-sensitive variable. The GitHub App token used here cannot reliably list
+  # Actions secret names, so use the paired variable as the readiness marker.
+  # azure/login remains the final fail-closed check for the secret itself.
+  grep -qx "AZURE_CLIENT_ID" <<< "$variable_names" || ready=false
   for name in ACCEPTANCE_TEST_DIR ACCEPTANCE_TEST_SECRET_MAP ACCEPTANCE_TEST_DEPENDENCIES K8S_DEPLOYMENT_NAME K8S_CONTAINER_NAME; do
     grep -qx "$name" <<< "$variable_names" || ready=false
   done

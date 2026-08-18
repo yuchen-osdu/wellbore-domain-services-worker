@@ -16,9 +16,13 @@
 #   --dry-run     Print the assessment without opening/closing the issue
 #
 # Environment:
-#   GH_TOKEN      Token with repo admin (read secret/variable names) + issues:write
+#   GH_TOKEN      Token with repository-variable read + issues:write
 #
-# AZURE_CLIENT_ID is checked present-only; its value is never read or logged.
+# `spi onboard` writes AZURE_CLIENT_ID as both a secret (consumed by azure/login)
+# and a non-sensitive variable (workflow gate + repo-to-cluster link). GitHub App
+# installation tokens cannot enumerate Actions secret names unless the App has a
+# separate Secrets permission, so the paired variable is the durable readiness
+# marker here. A missing secret still fails explicitly in azure/login.
 # Descriptor findings are reported as field paths + stable error codes only, so no
 # descriptor or secret value ever reaches the issue body.
 
@@ -37,16 +41,14 @@ export GH_TOKEN="${GH_TOKEN:-}"
 
 ISSUE_TITLE="⚙️ Deploy onboarding: required CI configuration missing"
 
-secret_names="$(gh api --paginate "repos/${REPO}/actions/secrets" --jq '.secrets[].name' 2>/dev/null || echo "")"
 variables_json="$(gh api --paginate --slurp "repos/${REPO}/actions/variables?per_page=100" 2>/dev/null || echo '[{"variables":[]}]')"
 variable_names="$(jq -r '.[].variables[].name' <<< "$variables_json")"
 no_data_token_env="$(jq -r '[.[].variables[] | select(.name == "NO_DATA_ACCESS_TOKEN_ENV") | .value][0] // ""' <<< "$variables_json")"
 
 missing=()
-have_secret() { grep -qx "$1" <<< "$secret_names"; }
 have_var()    { grep -qx "$1" <<< "$variable_names"; }
 
-have_secret "AZURE_CLIENT_ID" || missing+=("secret \`AZURE_CLIENT_ID\` — set by \`spi onboard\`")
+have_var "AZURE_CLIENT_ID" || missing+=("deploy identity \`AZURE_CLIENT_ID\` — set by \`spi onboard\`")
 for v in K8S_DEPLOYMENT_NAME K8S_CONTAINER_NAME; do
   have_var "$v" || missing+=("variable \`$v\` — set by \`spi onboard\`")
 done
