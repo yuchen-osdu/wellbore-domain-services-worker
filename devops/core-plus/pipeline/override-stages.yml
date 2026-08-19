@@ -21,8 +21,19 @@ cimpl-test-python:
     - exists:
         - never/existing/file.txt
 
-#dev2 jobs
+#cimpl-prod-deploy
+cimpl-prod-deploy:
+  variable:
+    CIMPL_SERVICE: wellbore-worker-prod
+  before_script:
+    - echo "Deploying a new App version..."
+    
+cimpl-prod-test-python:
+  rules:
+    - exists:
+        - never/existing/file.txt
 
+#dev2 jobs
 cimpl-dev2-deploy:
   before_script:
     - echo "Deploying a new App version..."
