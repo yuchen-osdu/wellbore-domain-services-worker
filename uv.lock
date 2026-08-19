@@ -1694,7 +1694,7 @@ wheels = [
 
 [[package]]
 name = "osdu-core-lib-python-azure"
-version = "0.29.0"
+version = "0.29.3"
 source = { registry = "https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple/" }
 dependencies = [
     { name = "adlfs" },
@@ -1710,9 +1710,9 @@ dependencies = [
     { name = "osdu-api" },
     { name = "osdu-core-lib-python" },
 ]
-sdist = { url = "https://community.opengroup.org/api/v4/projects/465/packages/pypi/files/d89c5031793dec048e285cd309ac322b70e674479047b2b11e847140d3a6151f/osdu_core_lib_python_azure-0.29.0.tar.gz", hash = "sha256:d89c5031793dec048e285cd309ac322b70e674479047b2b11e847140d3a6151f" }
+sdist = { url = "https://community.opengroup.org/api/v4/projects/465/packages/pypi/files/68b2f21925612a9135fff1a263c543db3bdc1bf521817457a2f3b2a62faa3bb1/osdu_core_lib_python_azure-0.29.3.tar.gz", hash = "sha256:68b2f21925612a9135fff1a263c543db3bdc1bf521817457a2f3b2a62faa3bb1" }
 wheels = [
-    { url = "https://community.opengroup.org/api/v4/projects/465/packages/pypi/files/459d49a2938182aac6d28bddc779cc287d6e510278244b081437f952a0225a25/osdu_core_lib_python_azure-0.29.0-py3-none-any.whl", hash = "sha256:459d49a2938182aac6d28bddc779cc287d6e510278244b081437f952a0225a25" },
+    { url = "https://community.opengroup.org/api/v4/projects/465/packages/pypi/files/2ceec9c5207f0f930b9e471d8ad4e5c28a27bfbb039eae26aa9049de8408e718/osdu_core_lib_python_azure-0.29.3-py3-none-any.whl", hash = "sha256:2ceec9c5207f0f930b9e471d8ad4e5c28a27bfbb039eae26aa9049de8408e718" },
 ]
 
 [[package]]
@@ -1868,7 +1868,7 @@ requires-dist = [
     { name = "osdu-api", marker = "extra == 'baremetal'", specifier = ">=1.2.0" },
     { name = "osdu-core-lib-python", specifier = "==0.29.0" },
     { name = "osdu-core-lib-python-aws", marker = "extra == 'aws'", specifier = "==0.29.0" },
-    { name = "osdu-core-lib-python-azure", marker = "extra == 'az'", specifier = "==0.29.0" },
+    { name = "osdu-core-lib-python-azure", marker = "extra == 'az'", specifier = "==0.29.3" },
     { name = "osdu-core-lib-python-baremetal", marker = "extra == 'baremetal'", specifier = "==0.29.0" },
     { name = "osdu-core-lib-python-gcp", marker = "extra == 'gc'", specifier = "==0.29.0" },
     { name = "osdu-core-lib-python-ibm", marker = "extra == 'ibm'", specifier = "==0.29.0" },
