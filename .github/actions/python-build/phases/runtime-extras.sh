@@ -22,8 +22,8 @@ source "$(dirname "$0")/common.sh"
 
 mapfile -t EXTRA_ARGS < <(spi_extra_args "${RUNTIME_EXTRAS:-}")
 
-spi_group_start "uv sync --locked --no-dev ${RUNTIME_EXTRAS:-<no extras>}"
-uv sync --locked --no-dev "${EXTRA_ARGS[@]}"
+spi_group_start "uv sync --locked --no-dev --no-editable ${RUNTIME_EXTRAS:-<no extras>}"
+uv sync --locked --no-dev --no-editable "${EXTRA_ARGS[@]}"
 spi_group_end
 
 if [ -z "${RUNTIME_IMPORT_MODULES:-}" ] && [ -z "${DISTRIBUTION_NAME:-}" ]; then
@@ -34,7 +34,10 @@ fi
 spi_group_start "Runtime import smoke"
 # The module names are passed through the environment and imported by name, never
 # interpolated into a python -c string.
-uv run --frozen --no-dev "${EXTRA_ARGS[@]}" python - <<'PYTHON'
+# The environment was synchronized non-editably above. --no-sync is essential:
+# a normal `uv run` would restore the default editable project install and hide
+# the exact packaging defects this phase exists to catch.
+uv run --no-sync python - <<'PYTHON'
 import importlib
 import os
 import sys
