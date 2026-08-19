@@ -54,6 +54,10 @@
       {
         "path": ".github/security-patterns.txt",
         "description": "Security scanning patterns"
+      },
+      {
+        "path": ".github/scripts/filter_upstream_history.py",
+        "description": "Explicit deterministic upstream-history filter used by initialization and sync"
       }
     ],
     "workflows": {
@@ -231,6 +235,10 @@
       },
       {
         "path": "tests/test_workflow_summaries.py",
+        "reason": "Template-development test; fork instances retain only upstream service tests"
+      },
+      {
+        "path": "tests/test_upstream_history_filter.py",
         "reason": "Template-development test; fork instances retain only upstream service tests"
       },
       {

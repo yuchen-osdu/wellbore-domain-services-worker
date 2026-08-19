@@ -102,6 +102,28 @@ jobs:
             exit 1
           fi
           echo "DEFAULT_BRANCH=$DEFAULT_BRANCH" >> $GITHUB_ENV
+          echo "UPSTREAM_SYNC_REF=upstream/$DEFAULT_BRANCH" >> $GITHUB_ENV
+
+      - name: Prepare explicitly filtered upstream history
+        id: filtered-upstream
+        if: vars.UPSTREAM_HISTORY_EXCLUDE_PATHS != ''
+        env:
+          EXCLUDE_PATHS: ${{ vars.UPSTREAM_HISTORY_EXCLUDE_PATHS }}
+          UPSTREAM_REPO_URL: ${{ vars.UPSTREAM_REPO_URL }}
+        run: |
+          python -m venv "$RUNNER_TEMP/history-filter-venv"
+          "$RUNNER_TEMP/history-filter-venv/bin/python" -m pip install \
+            --disable-pip-version-check git-filter-repo==2.47.0
+          printf '%s\n' "$EXCLUDE_PATHS" > "$RUNNER_TEMP/upstream-history-exclude-paths.txt"
+          PATH="$RUNNER_TEMP/history-filter-venv/bin:$PATH" \
+          "$RUNNER_TEMP/history-filter-venv/bin/python" .github/scripts/filter_upstream_history.py \
+            --source-url "$UPSTREAM_REPO_URL" \
+            --branch "$DEFAULT_BRANCH" \
+            --output-dir "$RUNNER_TEMP/filtered-upstream" \
+            --exclude-paths-file "$RUNNER_TEMP/upstream-history-exclude-paths.txt"
+          git remote add filtered-upstream "$RUNNER_TEMP/filtered-upstream"
+          git fetch filtered-upstream "$DEFAULT_BRANCH"
+          echo "UPSTREAM_SYNC_REF=filtered-upstream/$DEFAULT_BRANCH" >> "$GITHUB_ENV"
 
       - name: Check for active cascades
         env:
@@ -180,7 +202,7 @@ jobs:
           echo "Captured pre-sync state: $BEFORE_SHA"
           
           # Try to merge upstream changes, automatically preferring upstream versions on conflict
-          git merge upstream/$DEFAULT_BRANCH -X theirs --no-edit
+          git merge "$UPSTREAM_SYNC_REF" -X theirs --no-edit
           
           # Check if there are any changes to commit
           if git diff --quiet fork_upstream; then
