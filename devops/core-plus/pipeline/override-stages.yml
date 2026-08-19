@@ -23,7 +23,7 @@ cimpl-test-python:
 
 #cimpl-prod-deploy
 cimpl-prod-deploy:
-  variable:
+  variables:
     CIMPL_SERVICE: wellbore-worker-prod
   before_script:
     - echo "Deploying a new App version..."
