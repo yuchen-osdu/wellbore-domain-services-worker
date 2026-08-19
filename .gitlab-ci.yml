@@ -57,9 +57,9 @@ include:
 .default:
   script:
     # uv.lock (resolved from pyproject.toml) is the source of truth. Install the
-    # locked dev + aws environment and activate it for the job's commands.
+    # locked dev + provider environment and activate it for the job's commands.
     - python -m pip install --upgrade pip "uv==0.11.19"
-    - uv sync --locked --extra dev --extra aws
+    - uv sync --locked --extra dev --extra aws --extra az
     - . .venv/bin/activate
 
 stages:
@@ -177,4 +177,3 @@ aws-update-tf:
 
 gc-helm-charts-gitlab:
   allow_failure: true
-

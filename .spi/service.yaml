@@ -22,8 +22,8 @@ build:
     compatibilityVersions: ["3.13"]
     distribution: osdu-wbddms-worker
     importPackage: wdmsworker
-    # Upstream unit tests import AWS provider modules, so CI installs the locked aws extra.
-    testExtras: [dev, aws]
+    # Unit tests import AWS modules and verify the Azure Workload Identity token scope.
+    testExtras: [dev, aws, az]
     runtimeExtras: [az]
 
 tests:
