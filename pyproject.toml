@@ -63,6 +63,7 @@ dev = [
 # cloud provider specific dependencies
 az = [
     "azure-monitor-opentelemetry-exporter>=1.0.0b46",
+    # 0.29.0 passes a raw resource to DefaultAzureCredential; 0.29.4 regresses it.
     "osdu-core-lib-python-azure==0.29.3",
     "aiohttp>=3.9.5",
     "msal>=1.24.1 "
