@@ -347,7 +347,7 @@ wheels = [
 
 [[package]]
 name = "azure-storage-blob"
-version = "12.29.0"
+version = "12.27.1"
 source = { registry = "https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple/" }
 dependencies = [
     { name = "azure-core" },
@@ -355,9 +355,9 @@ dependencies = [
     { name = "isodate" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/59/25/fdcf1e381922dbab8ba23d6fd78d397fe6cbac6b480310218834b7bc91fe/azure_storage_blob-12.29.0.tar.gz", hash = "sha256:2824ddd7ebc9056034ebc76b17971a38e9aa5835abb0d565b9700493f2a6c657", size = 611359, upload-time = "2026-05-15T03:34:59.865Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/36/7c/2fd872e11a88163f208b9c92de273bf64bb22d0eef9048cc6284d128a77a/azure_storage_blob-12.27.1.tar.gz", hash = "sha256:a1596cc4daf5dac9be115fcb5db67245eae894cf40e4248243754261f7b674a6", size = 597579, upload-time = "2025-10-29T12:27:16.185Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c2/2c/6ddee6a3e42d0236ba9259e4df7fa97fdc415ff0802b736c634baaf4b285/azure_storage_blob-12.29.0-py3-none-any.whl", hash = "sha256:ccf8a1bcd5e49df83ab85aab793b579e5ba2eeea2ad8900b2f62ca3a37dc391f", size = 434823, upload-time = "2026-05-15T03:35:01.837Z" },
+    { url = "https://files.pythonhosted.org/packages/3d/9e/1c90a122ea6180e8c72eb7294adc92531b0e08eb3d2324c2ba70d37f4802/azure_storage_blob-12.27.1-py3-none-any.whl", hash = "sha256:65d1e25a4628b7b6acd20ff7902d8da5b4fde8e46e19c8f6d213a3abc3ece272", size = 428954, upload-time = "2025-10-29T12:27:18.072Z" },
 ]
 
 [package.optional-dependencies]
@@ -1694,7 +1694,7 @@ wheels = [
 
 [[package]]
 name = "osdu-core-lib-python-azure"
-version = "0.29.3"
+version = "0.29.4"
 source = { registry = "https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple/" }
 dependencies = [
     { name = "adlfs" },
@@ -1710,9 +1710,9 @@ dependencies = [
     { name = "osdu-api" },
     { name = "osdu-core-lib-python" },
 ]
-sdist = { url = "https://community.opengroup.org/api/v4/projects/465/packages/pypi/files/68b2f21925612a9135fff1a263c543db3bdc1bf521817457a2f3b2a62faa3bb1/osdu_core_lib_python_azure-0.29.3.tar.gz", hash = "sha256:68b2f21925612a9135fff1a263c543db3bdc1bf521817457a2f3b2a62faa3bb1" }
+sdist = { url = "https://community.opengroup.org/api/v4/projects/465/packages/pypi/files/3eb6f78a8ba9d2c6675886a2e30a7d595005188b51ea71a9a8b04f0973d4bc8b/osdu_core_lib_python_azure-0.29.4.tar.gz", hash = "sha256:3eb6f78a8ba9d2c6675886a2e30a7d595005188b51ea71a9a8b04f0973d4bc8b" }
 wheels = [
-    { url = "https://community.opengroup.org/api/v4/projects/465/packages/pypi/files/2ceec9c5207f0f930b9e471d8ad4e5c28a27bfbb039eae26aa9049de8408e718/osdu_core_lib_python_azure-0.29.3-py3-none-any.whl", hash = "sha256:2ceec9c5207f0f930b9e471d8ad4e5c28a27bfbb039eae26aa9049de8408e718" },
+    { url = "https://community.opengroup.org/api/v4/projects/465/packages/pypi/files/c8e6b727e9b1f98759cf65b8621a1a8c5c825381357203fbfb0046890ce0c638/osdu_core_lib_python_azure-0.29.4-py3-none-any.whl", hash = "sha256:c8e6b727e9b1f98759cf65b8621a1a8c5c825381357203fbfb0046890ce0c638" },
 ]
 
 [[package]]
@@ -1868,7 +1868,7 @@ requires-dist = [
     { name = "osdu-api", marker = "extra == 'baremetal'", specifier = ">=1.2.0" },
     { name = "osdu-core-lib-python", specifier = "==0.29.0" },
     { name = "osdu-core-lib-python-aws", marker = "extra == 'aws'", specifier = "==0.29.0" },
-    { name = "osdu-core-lib-python-azure", marker = "extra == 'az'", specifier = "==0.29.3" },
+    { name = "osdu-core-lib-python-azure", marker = "extra == 'az'", specifier = "==0.29.4" },
     { name = "osdu-core-lib-python-baremetal", marker = "extra == 'baremetal'", specifier = "==0.29.0" },
     { name = "osdu-core-lib-python-gcp", marker = "extra == 'gc'", specifier = "==0.29.0" },
     { name = "osdu-core-lib-python-ibm", marker = "extra == 'ibm'", specifier = "==0.29.0" },
