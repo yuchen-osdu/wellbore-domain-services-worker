@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Aggregate Surefire and Failsafe XML reports for GitHub Actions outputs."""
+"""Aggregate Maven and pytest JUnit XML reports for GitHub Actions outputs."""
 
 from __future__ import annotations
 
@@ -69,6 +69,11 @@ def discover_reports(test_dir: Path) -> list[Path]:
             for path in test_dir.rglob(f"target/{report_dir}/*.xml")
             if path.is_file()
         )
+    reports.update(
+        path.resolve()
+        for path in (test_dir / ".spi-integration-results").glob("*.xml")
+        if path.is_file()
+    )
     return sorted(reports)
 
 
