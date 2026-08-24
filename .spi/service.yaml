@@ -37,6 +37,10 @@ tests:
   serviceSubprocess:
     type: pytest
     path: tests/service
+  acceptance:
+    type: pytest
+    path: tests/acceptance
+    runnerPath: .spi/run_acceptance.py
 
 container:
   appModule: wdmsworker.app:app
