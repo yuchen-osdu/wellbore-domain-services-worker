@@ -31,6 +31,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git branch -f main refs/remotes/origin/main
 
       - name: Add template remote
         env:
