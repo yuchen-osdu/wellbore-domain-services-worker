@@ -299,7 +299,11 @@ jobs:
               
               # Copy file from template
               if git show refs/remotes/template/main:"$file" > "$file" 2>/dev/null; then
-                git add "$file"
+                # Canonical build files may live under service .gitignore
+                # patterns such as build/. They are intentionally tracked by
+                # the engineering system, so force-add the exact configured
+                # file without broadening what Git tracks.
+                git add -f "$file"
               else
                 echo "File $file not found in template, skipping"
               fi

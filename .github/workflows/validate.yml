@@ -222,6 +222,8 @@ jobs:
       python_unit_test_path: ${{ steps.config.outputs.python_unit_test_path }}
       python_service_in_process_test_path: ${{ steps.config.outputs.python_service_in_process_test_path }}
       python_service_subprocess_test_path: ${{ steps.config.outputs.python_service_subprocess_test_path }}
+      python_acceptance_test_path: ${{ steps.config.outputs.python_acceptance_test_path }}
+      python_acceptance_runner_path: ${{ steps.config.outputs.python_acceptance_runner_path }}
       app_module: ${{ steps.config.outputs.app_module }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
@@ -938,14 +940,14 @@ jobs:
   deploy:
     name: "🚀 Deploy to spi-stack"
     needs: [read-service-config, docker-push]
-    # Java-only by design: the Python lane stops at a published GHCR image (issue #42).
-    # `build_lane == 'java'` is explicit rather than implied by java-build's outputs, and
-    # `!cancelled()` neutralizes the skipped Python sibling jobs in the transitive
-    # dependency graph. Every selected-lane dependency is checked explicitly below,
-    # so a failed/skipped Java build or Docker push still fails closed.
+    # Deployment is language-neutral: both lanes produce an immutable image digest and
+    # aks-deploy patches the same Deployment/container contract. `!cancelled()` neutralizes
+    # skipped sibling language jobs in the transitive dependency graph; every selected-lane
+    # predecessor is checked explicitly below so failures still close the lane.
     if: |
       !cancelled() && (
-        needs.read-service-config.outputs.build_lane == 'java' &&
+        (needs.read-service-config.outputs.build_lane == 'java' ||
+         needs.read-service-config.outputs.build_lane == 'python') &&
         needs.docker-push.result == 'success' &&
         vars.AZURE_CLIENT_ID != '' &&
         github.actor != 'dependabot[bot]' &&
@@ -957,7 +959,8 @@ jobs:
         !cancelled() &&
         github.event_name == 'workflow_dispatch' &&
         inputs.force_full_pipeline == true &&
-        needs.read-service-config.outputs.build_lane == 'java' &&
+        (needs.read-service-config.outputs.build_lane == 'java' ||
+         needs.read-service-config.outputs.build_lane == 'python') &&
         needs.docker-push.result == 'success' &&
         vars.AZURE_CLIENT_ID != ''
       )
@@ -975,6 +978,17 @@ jobs:
       deployed_digest: ${{ steps.deploy.outputs.deployed_digest }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
+      - name: "Validate Python live-acceptance contract"
+        if: needs.read-service-config.outputs.build_lane == 'python'
+        shell: bash
+        run: python .github/actions/integration-test/validate_runner_inputs.py
+        env:
+          TEST_TYPE: pytest
+          TEST_DIR: ${{ needs.read-service-config.outputs.python_acceptance_test_path }}
+          PYTEST_RUNNER: ${{ needs.read-service-config.outputs.python_acceptance_runner_path }}
+          PYTHON_VERSION: ${{ needs.read-service-config.outputs.python_runtime_version || '3.12' }}
+          UV_VERSION: '0.12.5'
+          PYTHON_TEST_EXTRAS: ${{ needs.read-service-config.outputs.python_test_extras }}
       - name: "Install kubectl"
         uses: azure/setup-kubectl@829323503d1be3d00ca8346e5391ca0b07a9ab0d  # v5.1.0
       - name: "Install kubelogin"
@@ -1000,13 +1014,13 @@ jobs:
   integration-test:
     name: "🧪 Integration Tests"
     needs: [read-service-config, docker-push, deploy]
-    # Java-only by design, same gating as the deploy job (issue #42 keeps the Python
-    # lane at build + image; no Python deploy or acceptance suite is wired). The
-    # explicit result gates keep `!cancelled()` from admitting a failed Java/deploy
-    # dependency while allowing skipped Python siblings.
+    # The cluster/digest/token/Key Vault contract is shared. Only the final test runner
+    # differs: Maven for Java and a descriptor-selected, argv-invoked pytest runner for
+    # Python. Explicit result gates keep `!cancelled()` from admitting failed predecessors.
     if: |
       !cancelled() && (
-        needs.read-service-config.outputs.build_lane == 'java' &&
+        (needs.read-service-config.outputs.build_lane == 'java' ||
+         needs.read-service-config.outputs.build_lane == 'python') &&
         needs.docker-push.result == 'success' &&
         needs.deploy.result == 'success' &&
         vars.AZURE_CLIENT_ID != '' &&
@@ -1019,7 +1033,8 @@ jobs:
         !cancelled() &&
         github.event_name == 'workflow_dispatch' &&
         inputs.force_full_pipeline == true &&
-        needs.read-service-config.outputs.build_lane == 'java' &&
+        (needs.read-service-config.outputs.build_lane == 'java' ||
+         needs.read-service-config.outputs.build_lane == 'python') &&
         needs.docker-push.result == 'success' &&
         needs.deploy.result == 'success' &&
         vars.AZURE_CLIENT_ID != ''
@@ -1037,6 +1052,7 @@ jobs:
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
       - name: "Set up Java"
+        if: needs.read-service-config.outputs.build_lane == 'java'
         uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654  # v5
         with:
           java-version: '17'
@@ -1057,11 +1073,15 @@ jobs:
           aks_resource_group: ${{ vars.AKS_RESOURCE_GROUP }}
           aks_cluster_name: ${{ vars.AKS_CLUSTER_NAME }}
           namespace: ${{ vars.K8S_NAMESPACE }}
+          test_type: ${{ needs.read-service-config.outputs.build_lane == 'python' && 'pytest' || 'maven' }}
           deployment_name: ${{ vars.K8S_DEPLOYMENT_NAME }}
           container_name: ${{ vars.K8S_CONTAINER_NAME }}
           gateway_url: ${{ vars.GATEWAY_URL }}
           keyvault_name: ${{ vars.KEYVAULT_NAME }}
-          test_dir: ${{ vars.ACCEPTANCE_TEST_DIR }}
+          test_dir: ${{ needs.read-service-config.outputs.build_lane == 'python' && needs.read-service-config.outputs.python_acceptance_test_path || vars.ACCEPTANCE_TEST_DIR }}
+          pytest_runner: ${{ needs.read-service-config.outputs.python_acceptance_runner_path }}
+          python_version: ${{ needs.read-service-config.outputs.python_runtime_version || '3.12' }}
+          python_test_extras: ${{ needs.read-service-config.outputs.python_test_extras }}
           secret_map: ${{ vars.ACCEPTANCE_TEST_SECRET_MAP || '{}' }}
           aad_client_id: ${{ vars.AAD_CLIENT_ID }}
           no_data_access_client_id: ${{ vars.NO_DATA_ACCESS_TESTER_CLIENT_ID }}

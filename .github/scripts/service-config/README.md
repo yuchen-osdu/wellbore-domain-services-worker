@@ -32,10 +32,13 @@ unit_test_type      has_coverage    build_lane    lane_implemented  fallback
 python_runtime_version  python_compatibility_versions  python_compatibility_matrix
 python_distribution  python_import_package  python_test_extras  python_runtime_extras
 python_unit_test_path  python_service_in_process_test_path
-python_service_subprocess_test_path  app_module
+python_service_subprocess_test_path  python_acceptance_test_path
+python_acceptance_runner_path  app_module
 ```
 
-Job outputs never carry shell commands, credentials or deployment targets.
+Job outputs never carry shell commands, credentials or deployment targets. A Python acceptance
+runner is a schema-validated repository-relative `.py` path; the integration action invokes it as
+an argv element with one fixed `--junit-xml` argument and never evaluates descriptor text as shell.
 
 Exit codes: `0` when the descriptor is valid or absent, `1` when a present descriptor is invalid
 (the required `🐳 Docker Build` check then fails closed).

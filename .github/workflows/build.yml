@@ -81,6 +81,8 @@ jobs:
       python_unit_test_path: ${{ steps.config.outputs.python_unit_test_path }}
       python_service_in_process_test_path: ${{ steps.config.outputs.python_service_in_process_test_path }}
       python_service_subprocess_test_path: ${{ steps.config.outputs.python_service_subprocess_test_path }}
+      python_acceptance_test_path: ${{ steps.config.outputs.python_acceptance_test_path }}
+      python_acceptance_runner_path: ${{ steps.config.outputs.python_acceptance_runner_path }}
       app_module: ${{ steps.config.outputs.app_module }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
