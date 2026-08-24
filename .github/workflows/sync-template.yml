@@ -218,7 +218,7 @@ jobs:
             git checkout -b $SYNC_BRANCH origin/$SYNC_BRANCH
 
             # Reset to main to get clean state
-            git reset --hard refs/heads/main
+            git reset --hard refs/remotes/origin/main
           else
             # Create new sync branch with timestamp
             DATE_SUFFIX=$(date +%Y%m%d-%H%M%S)
@@ -226,7 +226,7 @@ jobs:
             echo "🆕 Creating new branch: $SYNC_BRANCH"
 
             # Create and checkout sync branch from main
-            git checkout -b $SYNC_BRANCH refs/heads/main
+            git checkout -b $SYNC_BRANCH refs/remotes/origin/main
           fi
 
           echo "SYNC_BRANCH=$SYNC_BRANCH" >> $GITHUB_ENV
