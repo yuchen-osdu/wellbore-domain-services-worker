@@ -233,7 +233,7 @@
         "type": {
           "type": "string",
           "required": true,
-          "enum": ["pytest"]
+          "enum": ["python"]
         },
         "path": {
           "$comment": "Working directory for the live suite. The workflow joins it to GITHUB_WORKSPACE after path validation.",
@@ -242,7 +242,7 @@
           "maxLength": 120
         },
         "runnerPath": {
-          "$comment": "Repository-relative Python file implementing the fixed --junit-xml contract. It is executed as argv, never through eval or a caller-provided shell command.",
+          "$comment": "Repository-relative Python file implementing the TEST_REPO_ROOT/TEST_RESULTS_DIR contract. It is executed as argv, never through eval or a caller-provided shell command.",
           "type": "path",
           "required": true,
           "maxLength": 120

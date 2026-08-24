@@ -620,9 +620,13 @@ def _validate_consistency(
             )
         )
 
-    allowed_test_types = {defaults["unitTestType"]}
     for suite, definition in document.get("tests", {}).items():
         suite_type = definition.get("type") if isinstance(definition, dict) else None
+        allowed_test_types = (
+            {"python"}
+            if suite == "acceptance" and archetype == "python-uv-fastapi"
+            else {defaults["unitTestType"]}
+        )
         if suite_type and suite_type not in allowed_test_types:
             errors.append(
                 ValidationError(

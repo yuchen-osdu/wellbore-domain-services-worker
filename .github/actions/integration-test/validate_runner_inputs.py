@@ -40,13 +40,13 @@ def validate(
     *,
     test_type: str,
     test_dir: str,
-    pytest_runner: str,
+    python_runner: str,
     python_version: str,
     uv_version: str,
     python_test_extras: str,
 ) -> None:
-    if test_type not in {"maven", "pytest"}:
-        raise ValueError("test_type must be one of: maven, pytest")
+    if test_type not in {"maven", "python"}:
+        raise ValueError("test_type must be one of: maven, python")
 
     if test_type == "maven":
         directory = Path(test_dir)
@@ -62,10 +62,10 @@ def validate(
     if not directory.is_dir():
         raise ValueError(f"test_dir does not exist or is not a directory: {test_dir}")
 
-    runner = repository_path(root, pytest_runner, kind="pytest_runner")
+    runner = repository_path(root, python_runner, kind="python_runner")
     if not runner.is_file() or runner.suffix != ".py":
         raise ValueError(
-            f"pytest_runner must name an existing repository-relative .py file: {pytest_runner}"
+            f"python_runner must name an existing repository-relative .py file: {python_runner}"
         )
     if not VERSION_RE.fullmatch(python_version):
         raise ValueError("python_version must be MAJOR.MINOR or MAJOR.MINOR.PATCH")
@@ -88,7 +88,7 @@ def main() -> int:
             Path(os.environ["GITHUB_WORKSPACE"]),
             test_type=os.environ.get("TEST_TYPE", ""),
             test_dir=os.environ.get("TEST_DIR", ""),
-            pytest_runner=os.environ.get("PYTEST_RUNNER", ""),
+            python_runner=os.environ.get("PYTHON_RUNNER", ""),
             python_version=os.environ.get("PYTHON_VERSION", ""),
             uv_version=os.environ.get("UV_VERSION", ""),
             python_test_extras=os.environ.get("PYTHON_TEST_EXTRAS", ""),
