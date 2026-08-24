@@ -44,6 +44,19 @@ ISSUE_TITLE="⚙️ Deploy onboarding: required CI configuration missing"
 variables_json="$(gh api --paginate --slurp "repos/${REPO}/actions/variables?per_page=100" 2>/dev/null || echo '[{"variables":[]}]')"
 variable_names="$(jq -r '.[].variables[].name' <<< "$variables_json")"
 no_data_token_env="$(jq -r '[.[].variables[] | select(.name == "NO_DATA_ACCESS_TOKEN_ENV") | .value][0] // ""' <<< "$variables_json")"
+READ_SERVICE_CONFIG=".github/scripts/service-config/read_service_config.py"
+config_json=""
+build_lane=""
+python_acceptance_test_path=""
+python_acceptance_runner_path=""
+if [[ -f "$READ_SERVICE_CONFIG" ]]; then
+  config_json="$(python3 "$READ_SERVICE_CONFIG" --root . --format json --redact 2>/dev/null || true)"
+  if [[ -n "$config_json" ]] && jq empty <<< "$config_json" 2>/dev/null; then
+    build_lane="$(jq -r '.build_lane // ""' <<< "$config_json")"
+    python_acceptance_test_path="$(jq -r '.python_acceptance_test_path // ""' <<< "$config_json")"
+    python_acceptance_runner_path="$(jq -r '.python_acceptance_runner_path // ""' <<< "$config_json")"
+  fi
+fi
 
 missing=()
 have_var()    { grep -qx "$1" <<< "$variable_names"; }
@@ -56,15 +69,22 @@ if [[ -n "$no_data_token_env" ]]; then
   have_var "NO_DATA_ACCESS_TESTER_CLIENT_ID" \
     || missing+=("variable \`NO_DATA_ACCESS_TESTER_CLIENT_ID\` — set by \`spi onboard\` for negative-authorization tests")
 fi
-for v in ACCEPTANCE_TEST_DIR ACCEPTANCE_TEST_SECRET_MAP ACCEPTANCE_TEST_DEPENDENCIES; do
+for v in ACCEPTANCE_TEST_SECRET_MAP ACCEPTANCE_TEST_DEPENDENCIES; do
   have_var "$v" || missing+=("variable \`$v\` — set by the operator")
 done
+if [[ "$build_lane" == "python" ]]; then
+  [[ -n "$python_acceptance_test_path" ]] \
+    || missing+=("descriptor field \`tests.acceptance.path\` — Python live-test working directory")
+  [[ -n "$python_acceptance_runner_path" ]] \
+    || missing+=("descriptor field \`tests.acceptance.runnerPath\` — Python live-test runner")
+else
+  have_var "ACCEPTANCE_TEST_DIR" \
+    || missing+=("variable \`ACCEPTANCE_TEST_DIR\` — set by the operator")
+fi
 
 # --- Service descriptor + descriptor ownership (ADR-039) ---------------------
 # Reported through this same deduplicated issue rather than a competing tracker.
-READ_SERVICE_CONFIG=".github/scripts/service-config/read_service_config.py"
 if [[ -f "$READ_SERVICE_CONFIG" ]]; then
-  config_json="$(python3 "$READ_SERVICE_CONFIG" --root . --format json --redact 2>/dev/null || true)"
   if [[ -z "$config_json" ]] || ! jq empty <<< "$config_json" 2>/dev/null; then
     missing+=("service descriptor could not be evaluated — run \`python3 $READ_SERVICE_CONFIG --root . --format json\` locally")
   else

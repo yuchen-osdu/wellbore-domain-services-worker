@@ -14,11 +14,6 @@
         "description": "Fork-specific templates and configuration that get copied during sync updates"
       },
       {
-        "path": "build",
-        "sync_all": true,
-        "description": "Canonical service Dockerfile owned by the engineering system, synced to every fork (ADR-037)"
-      },
-      {
         "path": ".github/rulesets",
         "sync_all": true,
         "description": "Branch-protection rulesets reconciled by settings-apply.yml"
@@ -58,6 +53,26 @@
       {
         "path": ".github/scripts/filter_upstream_history.py",
         "description": "Explicit deterministic upstream-history filter used by initialization and sync"
+      },
+      {
+        "path": "build/Dockerfile",
+        "description": "Canonical Java service Dockerfile owned by the engineering system"
+      },
+      {
+        "path": "build/docker-entrypoint.sh",
+        "description": "Canonical Java service container entrypoint"
+      },
+      {
+        "path": "build/python/Dockerfile",
+        "description": "Canonical Python service Dockerfile owned by the engineering system"
+      },
+      {
+        "path": "build/python/Dockerfile.dockerignore",
+        "description": "Canonical Python build-context exclusions"
+      },
+      {
+        "path": "build/python/docker-entrypoint.sh",
+        "description": "Canonical Python service container entrypoint"
       }
     ],
     "workflows": {
@@ -219,6 +234,10 @@
       },
       {
         "path": "tests/test_python_build_plan.py",
+        "reason": "Template-development test; fork instances retain only upstream service tests"
+      },
+      {
+        "path": "tests/test_integration_test_runners.py",
         "reason": "Template-development test; fork instances retain only upstream service tests"
       },
       {

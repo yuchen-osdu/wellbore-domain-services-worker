@@ -65,7 +65,7 @@ export GH_TOKEN
 deploy_ready() {
   local ready=true name
   local variable_names
-  local variables_json no_data_token_env
+  local variables_json no_data_token_env build_lane config_json
   variables_json="$(gh api --paginate --slurp "repos/${REPO_FULL_NAME}/actions/variables?per_page=100" 2>/dev/null || echo '[{"variables":[]}]')"
   variable_names="$(jq -r '.[].variables[].name' <<< "$variables_json")"
   no_data_token_env="$(jq -r '[.[].variables[] | select(.name == "NO_DATA_ACCESS_TOKEN_ENV") | .value][0] // ""' <<< "$variables_json")"
@@ -74,9 +74,22 @@ deploy_ready() {
   # Actions secret names, so use the paired variable as the readiness marker.
   # azure/login remains the final fail-closed check for the secret itself.
   grep -qx "AZURE_CLIENT_ID" <<< "$variable_names" || ready=false
-  for name in ACCEPTANCE_TEST_DIR ACCEPTANCE_TEST_SECRET_MAP ACCEPTANCE_TEST_DEPENDENCIES K8S_DEPLOYMENT_NAME K8S_CONTAINER_NAME; do
+  for name in ACCEPTANCE_TEST_SECRET_MAP ACCEPTANCE_TEST_DEPENDENCIES K8S_DEPLOYMENT_NAME K8S_CONTAINER_NAME; do
     grep -qx "$name" <<< "$variable_names" || ready=false
   done
+  build_lane=""
+  if [[ -f ".github/scripts/service-config/read_service_config.py" ]]; then
+    config_json="$(python3 .github/scripts/service-config/read_service_config.py --root . --format json --redact 2>/dev/null || true)"
+    if [[ -n "$config_json" ]] && jq empty <<< "$config_json" 2>/dev/null; then
+      build_lane="$(jq -r '.build_lane // ""' <<< "$config_json")"
+    fi
+  fi
+  if [[ "$build_lane" == "python" ]]; then
+    [[ "$(jq -r '.python_acceptance_test_path // ""' <<< "$config_json")" != "" ]] || ready=false
+    [[ "$(jq -r '.python_acceptance_runner_path // ""' <<< "$config_json")" != "" ]] || ready=false
+  else
+    grep -qx "ACCEPTANCE_TEST_DIR" <<< "$variable_names" || ready=false
+  fi
   if [[ -n "$no_data_token_env" ]]; then
     grep -qx "NO_DATA_ACCESS_TESTER_CLIENT_ID" <<< "$variable_names" || ready=false
   fi

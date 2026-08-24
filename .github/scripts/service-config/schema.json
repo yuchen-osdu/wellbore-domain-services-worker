@@ -172,6 +172,10 @@
         "serviceSubprocess": {
           "$ref": "serviceTestSuite",
           "archetypes": ["python-uv-fastapi"]
+        },
+        "acceptance": {
+          "$ref": "acceptanceTestSuite",
+          "archetypes": ["python-uv-fastapi"]
         }
       }
     },
@@ -219,6 +223,28 @@
         },
         "path": {
           "type": "path",
+          "maxLength": 120
+        }
+      }
+    },
+    "acceptanceTestSuite": {
+      "type": "mapping",
+      "properties": {
+        "type": {
+          "type": "string",
+          "required": true,
+          "enum": ["pytest"]
+        },
+        "path": {
+          "$comment": "Working directory for the live suite. The workflow joins it to GITHUB_WORKSPACE after path validation.",
+          "type": "path",
+          "required": true,
+          "maxLength": 120
+        },
+        "runnerPath": {
+          "$comment": "Repository-relative Python file implementing the fixed --junit-xml contract. It is executed as argv, never through eval or a caller-provided shell command.",
+          "type": "path",
+          "required": true,
           "maxLength": 120
         }
       }
