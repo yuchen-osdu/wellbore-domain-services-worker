@@ -37,6 +37,10 @@ tests:
   serviceSubprocess:
     type: pytest
     path: tests/service
+  acceptance:
+    type: python
+    path: .
+    runnerPath: tests/run_containerized_worker.py
 
 container:
   appModule: wdmsworker.app:app
