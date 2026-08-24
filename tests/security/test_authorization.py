@@ -12,20 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import requests
 import pytest
+import requests
 
 
 @pytest.mark.parametrize(
-    "use_token,expected_status_code,expected_response",
+    "use_token,expected_status_codes,expected_response",
     [
-        (True, 404, ""),  # response is empty and should not contain "Not found"
-        (False, 403, "RBAC: access denied"),  # since recently, without token requests return 403 error
+        (True, {404}, ""),  # response is empty and should not contain "Not found"
+        # ADME routes the path and rejects anonymously at RBAC (403); SPI does not
+        # publish the worker route at all (404). Both satisfy the external-isolation
+        # contract this test owns.
+        (False, {403, 404}, "RBAC: access denied"),
     ],
 )
 @pytest.mark.parametrize("path", ["docs", "openapi.json", "about", "healthz", "data/unknown-record-id/unknown-id"])
 def test_service_not_reachable_externally(
-    base_url, check_cert, token, path, use_token, expected_status_code, expected_response
+    base_url, check_cert, token, path, use_token, expected_status_codes, expected_response
 ):
     """
     Test Worker service is not accessible from outside the cluster with or without a valid token.
@@ -37,7 +40,10 @@ def test_service_not_reachable_externally(
         headers["Authorization"] = f"Bearer {token}"
 
     response = requests.request("GET", url, headers=headers, verify=check_cert)
-    assert response.status_code == expected_status_code, (
+    assert response.status_code in expected_status_codes, (
         "Worker service should NOT be available from out of the cluster"
     )
-    assert response.text in expected_response, f"Response '{response.text}' should contains '{expected_response}'"
+    if response.status_code == 403:
+        assert expected_response in response.text, f"Response '{response.text}' should contain '{expected_response}'"
+    else:
+        assert response.text == "", f"Expected an empty 404 response, got '{response.text}'"
