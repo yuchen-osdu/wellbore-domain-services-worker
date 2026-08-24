@@ -299,7 +299,7 @@ jobs:
               
               # Copy file from template
               if git show refs/remotes/template/main:"$file" > "$file" 2>/dev/null; then
-                git add "$file"
+                git add -f "$file"
               else
                 echo "File $file not found in template, skipping"
               fi
