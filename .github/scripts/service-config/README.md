@@ -38,7 +38,9 @@ python_acceptance_runner_path  app_module
 
 Job outputs never carry shell commands, credentials or deployment targets. A Python acceptance
 runner is a schema-validated repository-relative `.py` path; the integration action invokes it as
-an argv element with one fixed `--junit-xml` argument and never evaluates descriptor text as shell.
+an argv element, exports `TEST_REPO_ROOT` and `TEST_RESULTS_DIR`, and never evaluates descriptor
+text as shell. The runner owns its test commands and writes one or more JUnit XML files beneath
+`TEST_RESULTS_DIR`.
 
 Exit codes: `0` when the descriptor is valid or absent, `1` when a present descriptor is invalid
 (the required `🐳 Docker Build` check then fails closed).

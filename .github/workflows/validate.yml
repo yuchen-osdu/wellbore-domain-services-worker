@@ -983,9 +983,9 @@ jobs:
         shell: bash
         run: python .github/actions/integration-test/validate_runner_inputs.py
         env:
-          TEST_TYPE: pytest
+          TEST_TYPE: python
           TEST_DIR: ${{ needs.read-service-config.outputs.python_acceptance_test_path }}
-          PYTEST_RUNNER: ${{ needs.read-service-config.outputs.python_acceptance_runner_path }}
+          PYTHON_RUNNER: ${{ needs.read-service-config.outputs.python_acceptance_runner_path }}
           PYTHON_VERSION: ${{ needs.read-service-config.outputs.python_runtime_version || '3.12' }}
           UV_VERSION: '0.12.5'
           PYTHON_TEST_EXTRAS: ${{ needs.read-service-config.outputs.python_test_extras }}
@@ -1073,13 +1073,13 @@ jobs:
           aks_resource_group: ${{ vars.AKS_RESOURCE_GROUP }}
           aks_cluster_name: ${{ vars.AKS_CLUSTER_NAME }}
           namespace: ${{ vars.K8S_NAMESPACE }}
-          test_type: ${{ needs.read-service-config.outputs.build_lane == 'python' && 'pytest' || 'maven' }}
+          test_type: ${{ needs.read-service-config.outputs.build_lane == 'python' && 'python' || 'maven' }}
           deployment_name: ${{ vars.K8S_DEPLOYMENT_NAME }}
           container_name: ${{ vars.K8S_CONTAINER_NAME }}
           gateway_url: ${{ vars.GATEWAY_URL }}
           keyvault_name: ${{ vars.KEYVAULT_NAME }}
           test_dir: ${{ needs.read-service-config.outputs.build_lane == 'python' && needs.read-service-config.outputs.python_acceptance_test_path || vars.ACCEPTANCE_TEST_DIR }}
-          pytest_runner: ${{ needs.read-service-config.outputs.python_acceptance_runner_path }}
+          python_runner: ${{ needs.read-service-config.outputs.python_acceptance_runner_path }}
           python_version: ${{ needs.read-service-config.outputs.python_runtime_version || '3.12' }}
           python_test_extras: ${{ needs.read-service-config.outputs.python_test_extras }}
           secret_map: ${{ vars.ACCEPTANCE_TEST_SECRET_MAP || '{}' }}

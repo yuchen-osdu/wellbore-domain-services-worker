@@ -8,7 +8,7 @@
 #     deploy; no prior login is required.
 #   - kubectl and kubelogin must be available on the runner.
 #   - Java 17 and Maven must be available only when `test_type=maven`. The action
-#     installs Python and uv itself before Azure login when `test_type=pytest`.
+#     installs Python and uv itself before Azure login when `test_type=python`.
 #
 # ENCAPSULATION: this action takes only explicit inputs. It never reads vars.* or secrets.*
 # directly -- the workflow caller wires them in (§5.3).
@@ -23,7 +23,7 @@ name: 'Integration Test (acceptance suite vs gateway)'
 description: >-
   Verify the deployed digest is still running, run an advisory cross-service health probe,
   pull acceptance-test secrets from Key Vault (masked), mint entitled and no-data-access
-  federated tokens, and run the service's Maven or pytest acceptance suite against the
+  federated tokens, and run the service's Maven suite or delegated Python runner against the
   gateway with retry-on-flake.
 
 inputs:
@@ -46,23 +46,23 @@ inputs:
     description: 'Repository-relative acceptance-test working directory. Java uses ACCEPTANCE_TEST_DIR; Python uses the descriptor tests.acceptance.path.'
     required: true
   test_type:
-    description: 'Closed runner mode: maven or pytest.'
+    description: 'Closed runner mode: maven or python.'
     required: false
     default: 'maven'
-  pytest_runner:
-    description: 'Repository-relative Python .py runner implementing the fixed --junit-xml contract. Required for test_type=pytest.'
+  python_runner:
+    description: 'Repository-relative Python .py runner. It receives TEST_REPO_ROOT and TEST_RESULTS_DIR and must write JUnit XML beneath TEST_RESULTS_DIR.'
     required: false
     default: ''
   python_version:
-    description: 'Python runtime used for pytest acceptance tests.'
+    description: 'Python runtime used for delegated acceptance runners.'
     required: false
     default: '3.12'
   uv_version:
-    description: 'Pinned uv version used to install the locked pytest environment.'
+    description: 'Pinned uv version used to install the locked Python acceptance environment.'
     required: false
     default: '0.12.5'
   python_test_extras:
-    description: 'Comma-separated validated extras installed by uv for pytest acceptance tests.'
+    description: 'Comma-separated validated extras installed by uv for delegated acceptance runners.'
     required: false
     default: ''
   namespace:
@@ -150,7 +150,7 @@ outputs:
     description: 'Link to the uploaded JUnit XML artifact (empty if none produced).'
     value: ${{ steps.report.outputs.artifact-url }}
   tests:
-    description: 'Number of tests reported by Maven or pytest JUnit XML.'
+    description: 'Number of tests reported by Maven or delegated-runner JUnit XML.'
     value: ${{ steps.junit.outputs.tests }}
   failures:
     description: 'Number of JUnit assertion failures.'
@@ -174,20 +174,20 @@ runs:
       env:
         TEST_TYPE: ${{ inputs.test_type }}
         TEST_DIR: ${{ inputs.test_dir }}
-        PYTEST_RUNNER: ${{ inputs.pytest_runner }}
+        PYTHON_RUNNER: ${{ inputs.python_runner }}
         PYTHON_VERSION: ${{ inputs.python_version }}
         UV_VERSION: ${{ inputs.uv_version }}
         PYTHON_TEST_EXTRAS: ${{ inputs.python_test_extras }}
 
-    - name: 'Set up Python for pytest acceptance tests'
-      if: ${{ inputs.test_type == 'pytest' }}
+    - name: 'Set up Python for delegated acceptance tests'
+      if: ${{ inputs.test_type == 'python' }}
       id: setup_python
       uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
       with:
         python-version: ${{ inputs.python_version }}
 
-    - name: 'Set up uv for pytest acceptance tests'
-      if: ${{ inputs.test_type == 'pytest' }}
+    - name: 'Set up uv for delegated acceptance tests'
+      if: ${{ inputs.test_type == 'python' }}
       uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
       with:
         version: ${{ inputs.uv_version }}
@@ -196,8 +196,8 @@ runs:
           **/uv.lock
           **/pyproject.toml
 
-    - name: 'Install locked pytest acceptance environment'
-      if: ${{ inputs.test_type == 'pytest' }}
+    - name: 'Install locked Python acceptance environment'
+      if: ${{ inputs.test_type == 'python' }}
       shell: bash
       run: |
         set -euo pipefail
@@ -477,7 +477,7 @@ runs:
         # Reading them as shell variables keeps them data.
         TEST_TYPE: ${{ inputs.test_type }}
         TEST_DIR: ${{ inputs.test_dir }}
-        PYTEST_RUNNER: ${{ inputs.pytest_runner }}
+        PYTHON_RUNNER: ${{ inputs.python_runner }}
         MAVEN_PROFILE: ${{ inputs.maven_profile }}
         MAVEN_GOAL: ${{ inputs.maven_goal }}
         GATEWAY_URL: ${{ inputs.gateway_url }}
@@ -502,12 +502,13 @@ runs:
               set +f
               mvn "$@"
               ;;
-            pytest)
+            python)
               report_dir="$PWD/.spi-integration-results"
               rm -rf -- "$report_dir"
               mkdir -p "$report_dir"
-              uv run --no-sync python "$GITHUB_WORKSPACE/$PYTEST_RUNNER" \
-                --junit-xml "$report_dir/junit.xml"
+              TEST_REPO_ROOT="$GITHUB_WORKSPACE" \
+              TEST_RESULTS_DIR="$report_dir" \
+                uv run --no-sync python "$GITHUB_WORKSPACE/$PYTHON_RUNNER"
               ;;
           esac
 
