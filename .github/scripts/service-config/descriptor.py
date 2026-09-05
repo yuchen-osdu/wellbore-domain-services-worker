@@ -28,10 +28,18 @@ MAX_LINES = 500
 MAX_DEPTH = 6
 MAX_ITEMS = 50
 
-_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*$")
+_KEY_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]*$")
 _INT_RE = re.compile(r"^-?[0-9]+$")
 _PLAIN_FORBIDDEN_START = set("&*!|>%@`{}[],?")
 _PATH_RE = re.compile(r"^[A-Za-z0-9.][A-Za-z0-9._/-]*$")
+_REPOSITORY_GLOB_RE = re.compile(r"^[A-Za-z0-9.*?\[][A-Za-z0-9._/*?\[\]-]*$")
+_DYNAMIC_MAPPING_PATHS = frozenset(
+    {
+        "tests.acceptance.bindings",
+        "tests.acceptance.keyVaultBindings",
+        "tests.acceptance.dependencies",
+    }
+)
 
 
 class DescriptorError(Exception):
@@ -99,6 +107,9 @@ class ResolvedConfig:
     python_acceptance_test_path: str = ""
     python_acceptance_runner_path: str = ""
     app_module: str = ""
+    acceptance_config: str = ""
+    java_maven_profiles: str = ""
+    service_target_jar: str = ""
     errors: List[ValidationError] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
 
@@ -144,6 +155,9 @@ class ResolvedConfig:
             "python_acceptance_test_path": self.python_acceptance_test_path,
             "python_acceptance_runner_path": self.python_acceptance_runner_path,
             "app_module": self.app_module,
+            "acceptance_config": self.acceptance_config,
+            "java_maven_profiles": self.java_maven_profiles,
+            "service_target_jar": self.service_target_jar,
         }
 
     def to_json_dict(self, redact: bool = False) -> Dict[str, Any]:
@@ -408,7 +422,7 @@ def _check_forbidden(
     if isinstance(node, dict):
         for key, value in node.items():
             child = f"{path}.{key}" if path else key
-            if key.lower() in forbidden:
+            if path not in _DYNAMIC_MAPPING_PATHS and key.lower() in forbidden:
                 errors.append(
                     ValidationError(
                         child,
@@ -426,6 +440,9 @@ def _validate_mapping(
     archetype: str,
     schema: Dict[str, Any],
     errors: List[ValidationError],
+    key_pattern: Optional[str] = None,
+    additional_rule: Optional[Dict[str, Any]] = None,
+    key_environment_identifier: bool = False,
 ) -> None:
     if not isinstance(node, dict):
         errors.append(ValidationError(path or "<root>", "invalid-type", "expected a mapping"))
@@ -435,10 +452,30 @@ def _validate_mapping(
         child_path = f"{path}.{key}" if path else key
         rule = properties.get(key)
         if rule is None:
-            errors.append(
-                ValidationError(child_path, "unknown-key", f"'{key}' is not part of the schema")
-            )
-            continue
+            if additional_rule is None:
+                errors.append(
+                    ValidationError(
+                        child_path, "unknown-key", f"'{key}' is not part of the schema"
+                    )
+                )
+                continue
+            if key_pattern and not re.fullmatch(key_pattern, key):
+                errors.append(
+                    ValidationError(
+                        child_path,
+                        "invalid-key",
+                        f"mapping key '{key}' does not match {key_pattern}",
+                    )
+                )
+            if key_environment_identifier and _is_reserved_environment_identifier(key, schema):
+                errors.append(
+                    ValidationError(
+                        child_path,
+                        "reserved-environment-identifier",
+                        "environment identifier is reserved by the process or workflow runtime",
+                    )
+                )
+            rule = additional_rule
         rule = _resolve_ref(rule, schema)
         allowed = rule.get("archetypes")
         if allowed and archetype and archetype not in allowed:
@@ -453,7 +490,10 @@ def _validate_mapping(
         _validate_value(value, rule, child_path, archetype, schema, errors)
 
     for key, rule in properties.items():
-        if _resolve_ref(rule, schema).get("required") and key not in node:
+        resolved_rule = _resolve_ref(rule, schema)
+        allowed = resolved_rule.get("archetypes")
+        required_for_archetype = not allowed or not archetype or archetype in allowed
+        if resolved_rule.get("required") and required_for_archetype and key not in node:
             child_path = f"{path}.{key}" if path else key
             errors.append(ValidationError(child_path, "missing-key", f"'{key}' is required"))
 
@@ -467,6 +507,12 @@ def _resolve_ref(rule: Dict[str, Any], schema: Dict[str, Any]) -> Dict[str, Any]
     return resolved
 
 
+def _is_reserved_environment_identifier(value: str, schema: Dict[str, Any]) -> bool:
+    reserved = schema.get("reservedEnvironmentIdentifiers", [])
+    prefixes = schema.get("reservedEnvironmentPrefixes", [])
+    return value in reserved or any(value.startswith(prefix) for prefix in prefixes)
+
+
 def _validate_value(
     value: Any,
     rule: Dict[str, Any],
@@ -478,7 +524,17 @@ def _validate_value(
     expected = rule.get("type")
 
     if expected == "mapping":
-        _validate_mapping(value, rule.get("properties", {}), path, archetype, schema, errors)
+        _validate_mapping(
+            value,
+            rule.get("properties", {}),
+            path,
+            archetype,
+            schema,
+            errors,
+            key_pattern=rule.get("keyPattern"),
+            additional_rule=rule.get("additionalProperties"),
+            key_environment_identifier=rule.get("keyEnvironmentIdentifier", False),
+        )
         return
 
     if expected == "list":
@@ -495,6 +551,23 @@ def _validate_value(
     if expected == "integer":
         if isinstance(value, bool) or not isinstance(value, int):
             errors.append(ValidationError(path, "invalid-type", "expected an integer"))
+            return
+        if "minimum" in rule and value < rule["minimum"]:
+            errors.append(
+                ValidationError(
+                    path,
+                    "out-of-range",
+                    f"value must be at least {rule['minimum']}",
+                )
+            )
+        if "maximum" in rule and value > rule["maximum"]:
+            errors.append(
+                ValidationError(
+                    path,
+                    "out-of-range",
+                    f"value must be at most {rule['maximum']}",
+                )
+            )
         return
 
     if expected == "coverage":
@@ -530,10 +603,41 @@ def _validate_value(
             )
         return
 
+    if expected == "repositoryGlob":
+        if not isinstance(value, str):
+            errors.append(ValidationError(path, "invalid-type", "expected a string glob"))
+            return
+        if len(value) > rule.get("maxLength", 120):
+            errors.append(ValidationError(path, "too-long", "glob is too long"))
+            return
+        if (
+            value.startswith("/")
+            or ".." in value.split("/")
+            or not _REPOSITORY_GLOB_RE.fullmatch(value)
+        ):
+            errors.append(
+                ValidationError(
+                    path,
+                    "invalid-path",
+                    "glob must be repository-relative, free of '..' and contain only safe glob characters",
+                )
+            )
+        return
+
     if expected == "string":
         if not isinstance(value, str):
             errors.append(ValidationError(path, "invalid-type", "expected a string"))
             return
+        if rule.get("environmentIdentifier") and _is_reserved_environment_identifier(
+            value, schema
+        ):
+            errors.append(
+                ValidationError(
+                    path,
+                    "reserved-environment-identifier",
+                    "environment identifier is reserved by the process or workflow runtime",
+                )
+            )
         if "enum" in rule and value not in rule["enum"]:
             errors.append(
                 ValidationError(
@@ -620,6 +724,30 @@ def _validate_consistency(
             )
         )
 
+    acceptance = _lookup(document, "tests.acceptance")
+    if isinstance(acceptance, dict):
+        for name, binding in acceptance.get("bindings", {}).items():
+            if not isinstance(binding, dict):
+                continue
+            source = binding.get("source")
+            has_value = "value" in binding
+            if source == "literal" and not has_value:
+                errors.append(
+                    ValidationError(
+                        f"tests.acceptance.bindings.{name}.value",
+                        "missing-key",
+                        "literal bindings require 'value'",
+                    )
+                )
+            elif source != "literal" and has_value:
+                errors.append(
+                    ValidationError(
+                        f"tests.acceptance.bindings.{name}.value",
+                        "source-value-mismatch",
+                        "'value' is only allowed when source is 'literal'",
+                    )
+                )
+
     for suite, definition in document.get("tests", {}).items():
         suite_type = definition.get("type") if isinstance(definition, dict) else None
         allowed_test_types = (
@@ -641,6 +769,47 @@ def _validate_consistency(
 # ---------------------------------------------------------------------------
 # Resolution
 # ---------------------------------------------------------------------------
+
+
+def _acceptance_config(document: Dict[str, Any], archetype: str) -> str:
+    acceptance = document.get("tests", {}).get("acceptance")
+    if not isinstance(acceptance, dict):
+        return ""
+
+    bindings: Dict[str, Dict[str, str]] = {}
+    for name in sorted(acceptance.get("bindings", {})):
+        binding = acceptance["bindings"][name]
+        normalized = {"source": binding["source"]}
+        if "suffix" in binding:
+            normalized["suffix"] = binding["suffix"]
+        if "value" in binding:
+            normalized["value"] = binding["value"]
+        bindings[name] = normalized
+
+    key_vault_bindings = {
+        name: acceptance["keyVaultBindings"][name]
+        for name in sorted(acceptance.get("keyVaultBindings", {}))
+    }
+    dependencies = {
+        name: acceptance["dependencies"][name]
+        for name in sorted(acceptance.get("dependencies", {}))
+    }
+    normalized_acceptance = {
+        "type": acceptance["type"],
+        "path": acceptance["path"],
+        "runnerPath": acceptance.get("runnerPath", ""),
+        "mavenArguments": acceptance.get(
+            "mavenArguments", ["verify"] if archetype == "java-maven-azure" else []
+        ),
+        "rootTokenEnv": acceptance.get("rootTokenEnv", "ROOT_USER_TOKEN"),
+        "noDataAccessTokenEnv": acceptance.get("noDataAccessTokenEnv", ""),
+        "bindings": bindings,
+        "keyVaultBindings": key_vault_bindings,
+        "dependencies": dependencies,
+        "timeoutMinutes": acceptance.get("timeoutMinutes", 25),
+        "maxAttempts": acceptance.get("maxAttempts", 2),
+    }
+    return json.dumps(normalized_acceptance, separators=(",", ":"))
 
 
 def java_markers_present(root: Path) -> bool:
@@ -724,8 +893,15 @@ def resolve(
     coverage = unit.get("coverage", defaults["coverage"])
     config.has_coverage = "false" if coverage in (False, "none") else "true"
 
+    build = document.get("build", {})
+    if config.build_lane == "java":
+        config.java_maven_profiles = ",".join(build.get("mavenProfiles", []))
+        config.service_target_jar = build.get("artifact", {}).get("path", "")
+
+    config.acceptance_config = _acceptance_config(document, archetype)
+
     if config.build_lane == "python":
-        python = document.get("build", {}).get("python", {})
+        python = build.get("python", {})
         config.python_runtime_version = python.get(
             "runtimeVersion", defaults.get("runtimeVersion", "")
         )

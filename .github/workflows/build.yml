@@ -71,6 +71,9 @@ jobs:
       build_lane: ${{ steps.config.outputs.build_lane }}
       lane_implemented: ${{ steps.config.outputs.lane_implemented }}
       fallback: ${{ steps.config.outputs.fallback }}
+      java_maven_profiles: ${{ steps.config.outputs.java_maven_profiles }}
+      service_target_jar: ${{ steps.config.outputs.service_target_jar }}
+      acceptance_config: ${{ steps.config.outputs.acceptance_config }}
       python_runtime_version: ${{ steps.config.outputs.python_runtime_version }}
       python_compatibility_versions: ${{ steps.config.outputs.python_compatibility_versions }}
       python_compatibility_matrix: ${{ steps.config.outputs.python_compatibility_matrix }}
@@ -113,6 +116,9 @@ jobs:
               echo "build_lane=${LANE}"
               echo "lane_implemented=$([ "$LANE" = "java" ] && echo true || echo false)"
               echo "fallback=$([ "$LANE" = "java" ] && echo java-inference || echo none)"
+              echo "java_maven_profiles="
+              echo "service_target_jar="
+              echo "acceptance_config="
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -280,7 +286,7 @@ jobs:
           gitlab_token: ${{ secrets.GITLAB_TOKEN }}
           # Match validate.yml so service-specific provider scopes are honored
           # consistently in both required and feature-branch builds.
-          maven_profile: ${{ vars.MAVEN_PROFILE || 'core,azure' }}
+          maven_profile: ${{ needs.read-service-config.outputs.java_maven_profiles || 'core,azure' }}
 
   code-coverage:
     name: "📊 Code Coverage"
@@ -310,7 +316,7 @@ jobs:
         env:
           MAVEN_OPTS: "-Dmaven.repo.local=$HOME/.m2/repository"
           COMMUNITY_MAVEN_TOKEN: ${{ secrets.GITLAB_TOKEN }}
-          MAVEN_PROFILE: ${{ vars.MAVEN_PROFILE || 'core,azure' }}
+          MAVEN_PROFILE: ${{ needs.read-service-config.outputs.java_maven_profiles || 'core,azure' }}
           SIS_DATA: ${{ github.workspace }}/apachesis_setup/SIS_DATA
         run: |
           # Set up Maven CLI options
