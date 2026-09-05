@@ -1,12 +1,11 @@
-# Manually roll a service's Deployment back to a previous-good image digest.
+# Manually roll a service's Deployment back to an exact immutable image.
 #
-# Operator break-glass for §8.9: when one bad deploy is poisoning cross-service tests, restore
-# the service to its last-known-good digest without waiting for the original PR author to push
-# a fix. Human-triggered only -- there is NO auto-rollback (NG5 stands).
+# Candidate-validation jobs normally restore the image they observed before mutation. Use this
+# workflow when cancellation or runner loss prevented cleanup. The complete repository@digest
+# reference is required so rollback never guesses which registry/package owns a digest.
 #
-# Reads the previous-good digest from a prior deploy run's `aks-deploy` `previous_digest` output
-# (operators copy it from that run's logs/summary). The image already exists in GHCR, so this
-# skips docker-build entirely and just re-points the Deployment.
+# Read `previous_image` from the failed transaction's summary. The image already exists in its
+# original registry, so this skips docker-build entirely and re-points the Deployment.
 #
 # Single-service workflow: the target service is resolved from `vars.SERVICE_NAME`, falling back
 # to this repository's own name (the same derivation validate.yml uses), NOT a dispatch
@@ -19,13 +18,13 @@
 
 name: Restore Deployment
 
-run-name: "restore ${{ vars.SERVICE_NAME || github.event.repository.name }} -> ${{ inputs.digest }}"
+run-name: "restore ${{ vars.SERVICE_NAME || github.event.repository.name }} -> ${{ inputs.image }}"
 
 on:
   workflow_dispatch:
     inputs:
-      digest:
-        description: 'Previous-good image digest to restore (must start with sha256:, e.g. sha256:abc123...). Copy it from a prior deploy run''s aks-deploy previous_digest output.'
+      image:
+        description: 'Complete immutable image to restore: <repository>@sha256:<64-hex>. Copy previous_image from the failed transaction summary.'
         required: true
         type: string
 
@@ -64,17 +63,6 @@ jobs:
         env:
           SERVICE_NAME: ${{ vars.SERVICE_NAME || github.event.repository.name }}
 
-      - name: "Validate digest format"
-        shell: bash
-        # Catches the "double sha256:" foot-gun and typos before kubectl ever runs.
-        run: |
-          if ! printf '%s' "$DIGEST" | grep -Eq '^sha256:[a-f0-9]{64}$'; then
-            echo "::error::digest must match ^sha256:[a-f0-9]{64}$ (got: '$DIGEST')."
-            exit 1
-          fi
-        env:
-          DIGEST: ${{ inputs.digest }}
-
       - name: "Checkout (for the aks-deploy composite action)"
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
 
@@ -86,20 +74,14 @@ jobs:
         with:
           kubelogin-version: 'v0.1.4'
 
-      - name: "Compute image repository"
+      - name: "Validate and parse immutable image"
         id: image
         shell: bash
-        # Reuse the docker-build metadata helper so the restore path derives the GHCR
-        # repository exactly like the build path does. Critically it lowercases: GHCR
-        # rejects uppercase, and github.repository_owner preserves the org's canonical
-        # casing (e.g. "Azure"), so interpolating it raw yields an unpullable
-        # ghcr.io/Azure/<service>.
-        run: ./.github/actions/docker-build/compute-metadata.sh ghcr.io "$OWNER" "$SERVICE_NAME"
+        run: python ./.github/actions/aks-deploy/parse_image_reference.py "$IMAGE"
         env:
-          OWNER: ${{ github.repository_owner }}
-          SERVICE_NAME: ${{ vars.SERVICE_NAME || github.event.repository.name }}
+          IMAGE: ${{ inputs.image }}
 
-      - name: "Restore image (by digest)"
+      - name: "Restore immutable image"
         uses: ./.github/actions/aks-deploy
         with:
           azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -111,8 +93,9 @@ jobs:
           flux_namespace: ${{ vars.FLUX_NAMESPACE }}
           deployment_name: ${{ vars.K8S_DEPLOYMENT_NAME }}
           container_name: ${{ vars.K8S_CONTAINER_NAME }}
-          image_repository: ${{ steps.image.outputs.image_repository }}
-          image_digest: ${{ inputs.digest }}
+          image_repository: ${{ steps.image.outputs.repository }}
+          image_digest: ${{ steps.image.outputs.digest }}
+          operation: restore
         id: restore
 
       - name: "Audit summary"
@@ -125,13 +108,13 @@ jobs:
             echo "- Triggered by: \`${{ github.actor }}\`"
             echo "- Service: \`${SERVICE_NAME}\`"
             echo "- Deployment: \`${DEPLOYMENT}\`"
-            echo "- Restored to digest: \`${DIGEST}\`"
-            echo "- aks-deploy previous_digest: \`${PREV:-<none>}\`"
+            echo "- Restored image: \`${IMAGE}\`"
+            echo "- Image replaced by restore: \`${PREV:-<none>}\`"
             echo "- aks-deploy deployed_digest: \`${DEPLOYED:-<none>}\`"
           } >> "$GITHUB_STEP_SUMMARY"
         env:
           SERVICE_NAME: ${{ vars.SERVICE_NAME || github.event.repository.name }}
           DEPLOYMENT: ${{ vars.K8S_DEPLOYMENT_NAME }}
-          DIGEST: ${{ inputs.digest }}
-          PREV: ${{ steps.restore.outputs.previous_digest }}
+          IMAGE: ${{ inputs.image }}
+          PREV: ${{ steps.restore.outputs.previous_image }}
           DEPLOYED: ${{ steps.restore.outputs.deployed_digest }}
