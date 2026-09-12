@@ -1,8 +1,34 @@
 {
-  "$comment": "Template-owned schema for the fork-owned service descriptor at .spi/service.yaml (ADR-039). Consumed by descriptor.py; it is a restricted, closed dialect (no additional keys anywhere) rather than full JSON Schema.",
-  "schemaVersion": 1,
-  "supportedSchemaVersions": [1],
-  "deprecatedSchemaVersions": [],
+  "$comment": "Template-owned schema for the fork-owned service descriptor at .spi/service.yaml (ADR-039). Consumed by descriptor.py; it is a restricted dialect with closed mappings except where keyPattern plus additionalProperties explicitly declares a dynamic map.",
+  "schemaVersion": 2,
+  "supportedSchemaVersions": [2],
+  "deprecatedSchemaVersions": [1],
+  "reservedEnvironmentIdentifiers": [
+    "PATH",
+    "HOME",
+    "SHELL",
+    "PWD",
+    "OLDPWD",
+    "BASH_ENV",
+    "ENV",
+    "LD_PRELOAD",
+    "LD_LIBRARY_PATH",
+    "PYTHONPATH",
+    "JAVA_TOOL_OPTIONS",
+    "MAVEN_OPTS",
+    "GITHUB_ENV",
+    "GITHUB_OUTPUT",
+    "GITHUB_PATH",
+    "GITHUB_STEP_SUMMARY",
+    "GITHUB_TOKEN",
+    "AZURE_CLIENT_ID",
+    "AZURE_TENANT_ID",
+    "AZURE_SUBSCRIPTION_ID",
+    "AZURE_FEDERATED_TOKEN_FILE",
+    "ACTIONS_ID_TOKEN_REQUEST_URL",
+    "ACTIONS_ID_TOKEN_REQUEST_TOKEN"
+  ],
+  "reservedEnvironmentPrefixes": ["GITHUB_", "RUNNER_", "ACTIONS_"],
   "archetypes": {
     "java-maven-azure": {
       "description": "Conventional OSDU Java service built with Maven and the Azure provider profile set.",
@@ -105,6 +131,11 @@
             "discovery": {
               "type": "string",
               "enum": ["spring-boot-azure"]
+            },
+            "path": {
+              "$comment": "Repository-relative glob used to select the built service JAR. It is emitted as data, never as a shell command.",
+              "type": "repositoryGlob",
+              "maxLength": 160
             }
           }
         },
@@ -174,8 +205,7 @@
           "archetypes": ["python-uv-fastapi"]
         },
         "acceptance": {
-          "$ref": "acceptanceTestSuite",
-          "archetypes": ["python-uv-fastapi"]
+          "$ref": "acceptanceTestSuite"
         }
       }
     },
@@ -197,6 +227,11 @@
     }
   },
   "definitions": {
+    "environmentIdentifier": {
+      "type": "string",
+      "environmentIdentifier": true,
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+    },
     "unitTestSuite": {
       "type": "mapping",
       "properties": {
@@ -233,7 +268,7 @@
         "type": {
           "type": "string",
           "required": true,
-          "enum": ["python"]
+          "enum": ["maven", "python"]
         },
         "path": {
           "$comment": "Working directory for the live suite. The workflow joins it to GITHUB_WORKSPACE after path validation.",
@@ -244,8 +279,84 @@
         "runnerPath": {
           "$comment": "Repository-relative Python file implementing the TEST_REPO_ROOT/TEST_RESULTS_DIR contract. It is executed as argv, never through eval or a caller-provided shell command.",
           "type": "path",
+          "archetypes": ["python-uv-fastapi"],
           "required": true,
           "maxLength": 120
+        },
+        "mavenArguments": {
+          "$comment": "Individual Maven argv tokens. A workflow must pass the decoded list directly to Maven and must never evaluate it as a shell string.",
+          "type": "list",
+          "archetypes": ["java-maven-azure"],
+          "default": ["verify"],
+          "items": {
+            "type": "string",
+            "maxLength": 240,
+            "pattern": "^[^\\s\\x00-\\x1F\\x7F]+$"
+          }
+        },
+        "rootTokenEnv": {
+          "$ref": "environmentIdentifier",
+          "default": "ROOT_USER_TOKEN"
+        },
+        "noDataAccessTokenEnv": {
+          "$ref": "environmentIdentifier"
+        },
+        "bindings": {
+          "type": "mapping",
+          "keyPattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$",
+          "keyEnvironmentIdentifier": true,
+          "additionalProperties": {
+            "type": "mapping",
+            "properties": {
+              "source": {
+                "type": "string",
+                "required": true,
+                "enum": ["gateway", "partition", "entitlementDomain", "storageAccount", "literal"]
+              },
+              "suffix": {
+                "type": "string",
+                "maxLength": 200,
+                "pattern": "^[A-Za-z0-9._~:/@+-]+$"
+              },
+              "value": {
+                "type": "string",
+                "maxLength": 240,
+                "pattern": "^[A-Za-z0-9._~:/@+-]+$"
+              }
+            }
+          }
+        },
+        "keyVaultBindings": {
+          "$comment": "Maps an environment variable to an Azure Key Vault secret name. Secret values are never represented in the descriptor.",
+          "type": "mapping",
+          "keyPattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$",
+          "keyEnvironmentIdentifier": true,
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 127,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,126}$"
+          }
+        },
+        "dependencies": {
+          "type": "mapping",
+          "keyPattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 200,
+            "pattern": "^/[A-Za-z0-9._~/-]*$"
+          }
+        },
+        "timeoutMinutes": {
+          "type": "integer",
+          "default": 25,
+          "minimum": 1,
+          "maximum": 180
+        },
+        "maxAttempts": {
+          "type": "integer",
+          "default": 2,
+          "minimum": 1,
+          "maximum": 5
         }
       }
     }
