@@ -68,13 +68,6 @@ az = [
     "msal>=1.24.1 "
 ]
 
-aws = [
-    "boto3",
-    "botocore",
-    "osdu-core-lib-python-aws==0.29.0",
-    "opentelemetry-exporter-otlp-proto-http==1.40.0",
-]
-
 ibm = [
     "aiohttp>=3.8.0",
     "osdu-core-lib-python-ibm==0.29.0",
