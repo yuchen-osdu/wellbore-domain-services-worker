@@ -241,6 +241,10 @@
         "reason": "Template-development test; fork instances retain only upstream service tests"
       },
       {
+        "path": "tests/test_aks_deploy_contracts.py",
+        "reason": "Template-development test; fork instances retain only upstream service tests"
+      },
+      {
         "path": "tests/test_service_config_workflows.py",
         "reason": "Template-development test; fork instances retain only upstream service tests"
       },

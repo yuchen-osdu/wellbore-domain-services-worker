@@ -8,7 +8,7 @@ This directory is synced to every fork by template-sync. Forks do not edit it; t
 
 | File | Purpose |
 | --- | --- |
-| `schema.json` | Schema version 1: closed archetype enum, closed key set, forbidden privileged keys |
+| `schema.json` | Schema version 2: closed archetypes plus the acceptance-test data contract |
 | `descriptor.py` | Strict standard-library parser (YAML subset), validator and resolver |
 | `read_service_config.py` | Workflow/settings entry point: emits the `read-service-config` output contract or JSON |
 | `generate_descriptor.py` | Initialization detection and generation; halts on ambiguous/unsupported repositories |
@@ -33,14 +33,85 @@ python_runtime_version  python_compatibility_versions  python_compatibility_matr
 python_distribution  python_import_package  python_test_extras  python_runtime_extras
 python_unit_test_path  python_service_in_process_test_path
 python_service_subprocess_test_path  python_acceptance_test_path
-python_acceptance_runner_path  app_module
+python_acceptance_runner_path  app_module  acceptance_config  java_maven_profiles
+service_target_jar
 ```
 
-Job outputs never carry shell commands, credentials or deployment targets. A Python acceptance
-runner is a schema-validated repository-relative `.py` path; the integration action invokes it as
-an argv element, exports `TEST_REPO_ROOT` and `TEST_RESULTS_DIR`, and never evaluates descriptor
-text as shell. The runner owns its test commands and writes one or more JUnit XML files beneath
-`TEST_RESULTS_DIR`.
+`acceptance_config` is either empty or deterministic compact JSON. It always contains
+`type`, `path`, `runnerPath`, `mavenArguments`, `rootTokenEnv`,
+`noDataAccessTokenEnv`, `bindings`, `keyVaultBindings`, `dependencies`,
+`timeoutMinutes` and `maxAttempts`, with defaults normalized. `java_maven_profiles`
+is the comma-joined `build.mavenProfiles`; `service_target_jar` is the safe
+repository-relative `build.artifact.path` glob.
+
+Job outputs never carry shell commands or secret values. Maven arguments remain a JSON argv list,
+and a Python acceptance runner remains a schema-validated repository-relative `.py` path. Binding
+and Key Vault maps contain environment variable names, approved runtime sources, and Key Vault
+secret *names* only. Consumers must decode the JSON and invoke tools directly, never evaluate
+descriptor text as shell. Environment identifiers cannot replace protected process, GitHub
+Actions, runner, OIDC, Azure identity, language-tooling or shell variables; all `GITHUB_`,
+`RUNNER_` and `ACTIONS_` names are reserved.
+
+## Schema version 2 examples
+
+Java/Maven:
+
+```yaml
+schemaVersion: 2
+service:
+  name: legal
+  archetype: java-maven-azure
+build:
+  mavenProfiles: [core, azure]
+  artifact:
+    path: "**/target/*-spring-boot.jar"
+tests:
+  acceptance:
+    type: maven
+    path: testing/integration-tests
+    mavenArguments:
+      - -pl
+      - legal-test-azure
+      - -am
+      - verify
+      - -DfailIfNoTests=false
+      - -Dtest=!Class#method,!Other#method
+    bindings:
+      LEGAL_HOST:
+        source: gateway
+        suffix: /api/legal/v1
+    keyVaultBindings:
+      CLIENT_SECRET: acceptance-client-secret
+    dependencies:
+      entitlements: /api/entitlements/v2/_ah/readiness_check
+```
+
+Python:
+
+```yaml
+schemaVersion: 2
+service:
+  name: wellbore-ddms-worker
+  archetype: python-uv-fastapi
+tests:
+  acceptance:
+    type: python
+    path: tests/acceptance
+    runnerPath: .spi/run_acceptance.py
+    rootTokenEnv: ROOT_USER_TOKEN
+    noDataAccessTokenEnv: NO_DATA_ACCESS_TOKEN
+    timeoutMinutes: 25
+    maxAttempts: 2
+    bindings:
+      PARTITION_ID:
+        source: literal
+        value: opendes
+container:
+  appModule: wdmsworker.app:app
+```
+
+`schemaVersion: 1` remains build-compatible for existing services, but validation reports a
+deprecation warning and newly generated descriptors use version 2.
 
 Exit codes: `0` when the descriptor is valid or absent, `1` when a present descriptor is invalid
 (the required `🐳 Docker Build` check then fails closed).
