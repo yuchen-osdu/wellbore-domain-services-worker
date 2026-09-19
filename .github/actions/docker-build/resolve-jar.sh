@@ -2,13 +2,13 @@
 #
 # Resolve the service Spring Boot JAR to COPY into the image (ADR-037).
 #
-# The caller passes REQUESTED_JAR — the conventional path
-# provider/<service>-azure/target/*-spring-boot.jar (or a SERVICE_TARGET_JAR override).
+# The caller passes REQUESTED_JAR: either descriptor build.artifact.path or the
+# conventional provider/<service>-azure/target/*-spring-boot.jar.
 # Most forks match it directly. A fork whose Azure module name deviates from the repo
 # name (e.g. entitlements -> entitlements-v2-azure) matches nothing; rather than fail the
 # build — and, post-W10, the required check — we discover the Azure Spring Boot JAR so a
-# fresh fork builds with no manual variable and no first failure. SERVICE_TARGET_JAR is
-# needed only to disambiguate a service that builds more than one Azure Spring Boot JAR.
+# fresh fork builds with no manual variable and no first failure. The descriptor
+# disambiguates a service that builds more than one Azure Spring Boot JAR.
 #
 # Paths resolve relative to BUILD_CONTEXT: the Dockerfile COPY is context-relative and the
 # build artifacts download into the context, so the emitted path must be context-relative too.
@@ -68,11 +68,11 @@ else
       resolved="${preferred[0]}"
       echo "Disambiguated ${#discovered[@]} Azure JARs by service name '${IMAGE_NAME}': $resolved"
     else
-      echo "::error::Found ${#discovered[@]} Azure Spring Boot JARs and could not disambiguate (${discovered[*]}). Set the SERVICE_TARGET_JAR repository variable to the correct path."
+      echo "::error::Found ${#discovered[@]} Azure Spring Boot JARs and could not disambiguate (${discovered[*]}). Set build.artifact.path in .spi/service.yaml."
       exit 1
     fi
   else
-    echo "::error::No Spring Boot JAR matched '$REQUESTED_JAR' or provider/*-azure/target/*-spring-boot.jar. Confirm the java-build artifact downloaded, or set SERVICE_TARGET_JAR."
+    echo "::error::No Spring Boot JAR matched '$REQUESTED_JAR' or provider/*-azure/target/*-spring-boot.jar. Confirm the java-build artifact downloaded, or set build.artifact.path in .spi/service.yaml."
     exit 1
   fi
 fi

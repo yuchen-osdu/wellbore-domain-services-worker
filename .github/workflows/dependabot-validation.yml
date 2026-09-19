@@ -26,6 +26,25 @@ permissions:
   issues: write
 
 jobs:
+  read-service-config:
+    if: github.actor == 'dependabot[bot]'
+    name: "🧭 Read Service Config"
+    runs-on: ubuntu-latest
+    outputs:
+      java_maven_profiles: ${{ steps.config.outputs.java_maven_profiles }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
+      - name: "Resolve Service Configuration"
+        id: config
+        env:
+          SERVICE_NAME: ${{ vars.SERVICE_NAME || github.event.repository.name }}
+        run: |
+          python3 .github/scripts/service-config/read_service_config.py \
+            --root . \
+            --service-name "$SERVICE_NAME" \
+            --format github \
+            --output "$GITHUB_OUTPUT"
+
   check-repo-state:
     if: github.actor == 'dependabot[bot]'
     name: "🔍 Check Repository State"
@@ -46,7 +65,7 @@ jobs:
 
   java-build:
     name: "🔨 Dependabot Build Validation"
-    needs: check-repo-state
+    needs: [check-repo-state, read-service-config]
     if: needs.check-repo-state.outputs.is_java_repo == 'true'
     runs-on: ubuntu-latest
     outputs:
@@ -71,8 +90,13 @@ jobs:
           
       - name: Setup Maven Settings
         run: |
-          mkdir -p ~/.m2
-          cp .mvn/community-maven.settings.xml ~/.m2/settings.xml
+          if [ -f ".mvn/community-maven.settings.xml" ]; then
+            mkdir -p ~/.m2
+            cp .mvn/community-maven.settings.xml ~/.m2/settings.xml
+            echo "📝 Maven settings configured from .mvn/community-maven.settings.xml"
+          else
+            echo "📝 No custom Maven settings found, using defaults"
+          fi
         
       - name: "Run Java Build"
         id: build
@@ -83,7 +107,7 @@ jobs:
         with:
           generate_coverage: true
           gitlab_token: ${{ secrets.GITLAB_TOKEN }}
-          maven_profile: ${{ vars.MAVEN_PROFILE || 'core,azure' }}
+          maven_profile: ${{ needs.read-service-config.outputs.java_maven_profiles || 'core,azure' }}
       
       - name: "Post Build Status Comment"
         uses: ./.github/actions/pr-status

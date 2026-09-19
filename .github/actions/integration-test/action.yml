@@ -22,9 +22,9 @@
 name: 'Integration Test (acceptance suite vs gateway)'
 description: >-
   Verify the deployed digest is still running, run an advisory cross-service health probe,
-  pull acceptance-test secrets from Key Vault (masked), mint entitled and no-data-access
-  federated tokens, and run the service's Maven suite or delegated Python runner against the
-  gateway with retry-on-flake.
+  resolve the descriptor-owned test contract against Stack environment facts, mint entitled
+  and optional no-data-access tokens, and run the service's Maven suite or delegated Python
+  runner against the gateway with retry-on-flake.
 
 inputs:
   azure_client_id:
@@ -42,17 +42,9 @@ inputs:
   aks_cluster_name:
     description: 'AKS cluster name (org variable AKS_CLUSTER_NAME).'
     required: true
-  test_dir:
-    description: 'Repository-relative acceptance-test working directory. Java uses ACCEPTANCE_TEST_DIR; Python uses the descriptor tests.acceptance.path.'
+  acceptance_config:
+    description: 'Normalized JSON acceptance contract emitted by the service descriptor parser.'
     required: true
-  test_type:
-    description: 'Closed runner mode: maven or python.'
-    required: false
-    default: 'maven'
-  python_runner:
-    description: 'Repository-relative Python .py runner. It receives TEST_REPO_ROOT and TEST_RESULTS_DIR and must write JUnit XML beneath TEST_RESULTS_DIR.'
-    required: false
-    default: ''
   python_version:
     description: 'Python runtime used for delegated acceptance runners.'
     required: false
@@ -77,13 +69,21 @@ inputs:
   gateway_url:
     description: 'Base gateway URL, e.g. https://<gateway-host> (org variable GATEWAY_URL).'
     required: true
-  keyvault_name:
-    description: 'Key Vault holding acceptance-test secrets (org variable KEYVAULT_NAME).'
+  data_partition:
+    description: 'Environment data partition written by spi onboard.'
     required: true
-  secret_map:
-    description: 'JSON map of env-var-name -> kv-secret-name, e.g. {"INTEGRATION_TESTER":"integration-tester-id"}. Per-service. Empty {} when the suite needs no KV secrets (e.g. a service that authorizes any AAD service-principal token).'
+  entitlement_domain:
+    description: 'Environment Entitlements domain written by spi onboard.'
     required: false
-    default: '{}'
+    default: ''
+  storage_account_name:
+    description: 'Environment primary storage account name written by spi onboard.'
+    required: false
+    default: ''
+  keyvault_name:
+    description: 'Key Vault holding optional descriptor-declared test bindings.'
+    required: false
+    default: ''
   aad_client_id:
     description: >-
       Optional Entra app id to mint an app-only ROOT_USER_TOKEN for (org/service variable AAD_CLIENT_ID).
@@ -100,44 +100,9 @@ inputs:
       to negative-authorization tests. Used only when no_data_access_token_env is set.
     required: false
     default: ''
-  no_data_access_token_env:
-    description: >-
-      Env var that receives the short-lived no-data-access bearer token. Empty disables the second
-      token exchange. Most services use NO_DATA_ACCESS_TESTER_ACCESS_TOKEN; Workflow uses
-      NO_ACCESS_USER_TOKEN.
-    required: false
-    default: ''
-  root_token_env:
-    description: 'Env var name the acceptance suite reads a pre-minted bearer token from (raw, no "Bearer " prefix; the suite adds it). Only used when aad_client_id is set.'
-    required: false
-    default: 'ROOT_USER_TOKEN'
-  env_map:
-    description: 'Optional JSON map of NON-SECRET env-var-name -> literal value to export to the test run, e.g. {"PARTITION_BASE_URL":"https://gw/","MY_TENANT":"opendes"}. Per-service; never logged-masked (use secret_map for secrets).'
-    required: false
-    default: '{}'
   expected_digest:
     description: 'sha256 digest the deploy job set (needs.deploy.outputs.deployed_digest). The pod image is re-read and the run fails on mismatch (mid-test Flux resume / stale restart guard).'
     required: true
-  dependencies:
-    description: 'Optional JSON map of dependency-service -> gateway health path, e.g. {"partition":"/api/partition/v1/info"}. Probed at start; advisory only (drives cluster_state + PR label, never the exit code).'
-    required: false
-    default: '{}'
-  maven_goal:
-    description: 'Maven goal for the acceptance tests.'
-    required: false
-    default: 'verify'
-  maven_profile:
-    description: 'Optional Maven profile for the acceptance-test module.'
-    required: false
-    default: ''
-  max_attempts:
-    description: 'Acceptance-test retry attempts (flaky-test mitigation, §8.6).'
-    required: false
-    default: '2'
-  timeout_minutes:
-    description: 'Per-attempt timeout for the acceptance-test run.'
-    required: false
-    default: '10'
 
 outputs:
   test_result:
@@ -168,26 +133,37 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: 'Resolve descriptor acceptance contract'
+      id: contract
+      shell: bash
+      run: python "$GITHUB_ACTION_PATH/resolve_acceptance_config.py"
+      env:
+        ACCEPTANCE_CONFIG: ${{ inputs.acceptance_config }}
+        GATEWAY_URL: ${{ inputs.gateway_url }}
+        DATA_PARTITION_ID: ${{ inputs.data_partition }}
+        ENTITLEMENT_DOMAIN: ${{ inputs.entitlement_domain }}
+        STORAGE_ACCOUNT_NAME: ${{ inputs.storage_account_name }}
+
     - name: 'Validate integration-test runner inputs'
       shell: bash
       run: python "$GITHUB_ACTION_PATH/validate_runner_inputs.py"
       env:
-        TEST_TYPE: ${{ inputs.test_type }}
-        TEST_DIR: ${{ inputs.test_dir }}
-        PYTHON_RUNNER: ${{ inputs.python_runner }}
+        TEST_TYPE: ${{ steps.contract.outputs.test_type }}
+        TEST_DIR: ${{ steps.contract.outputs.test_dir }}
+        PYTHON_RUNNER: ${{ steps.contract.outputs.python_runner }}
         PYTHON_VERSION: ${{ inputs.python_version }}
         UV_VERSION: ${{ inputs.uv_version }}
         PYTHON_TEST_EXTRAS: ${{ inputs.python_test_extras }}
 
     - name: 'Set up Python for delegated acceptance tests'
-      if: ${{ inputs.test_type == 'python' }}
+      if: ${{ steps.contract.outputs.test_type == 'python' }}
       id: setup_python
       uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
       with:
         python-version: ${{ inputs.python_version }}
 
     - name: 'Set up uv for delegated acceptance tests'
-      if: ${{ inputs.test_type == 'python' }}
+      if: ${{ steps.contract.outputs.test_type == 'python' }}
       uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
       with:
         version: ${{ inputs.uv_version }}
@@ -197,7 +173,7 @@ runs:
           **/pyproject.toml
 
     - name: 'Install locked Python acceptance environment'
-      if: ${{ inputs.test_type == 'python' }}
+      if: ${{ steps.contract.outputs.test_type == 'python' }}
       shell: bash
       run: |
         set -euo pipefail
@@ -268,8 +244,8 @@ runs:
         if [ -n "$DEPS" ] && [ "$DEPS" != "{}" ]; then
           # Validate before iterating: `jq -r keys[]` on malformed input prints
           # nothing and the loop silently becomes a no-op, so a typo in
-          # ACCEPTANCE_TEST_DEPENDENCIES would read as "no dependencies" instead
-          # of a configuration error.
+          # descriptor dependencies would read as "no dependencies" instead of
+          # a configuration error.
           if ! jq -e 'type == "object"' >/dev/null 2>&1 <<< "$DEPS"; then
             echo "::error::dependencies must be a JSON object of service -> health path (got: $DEPS)"
             exit 1
@@ -288,7 +264,7 @@ runs:
         echo "cluster_state=$STATE" >> "$GITHUB_OUTPUT"
         echo "Cluster state at start of run: $STATE"
       env:
-        DEPS: ${{ inputs.dependencies }}
+        DEPS: ${{ steps.contract.outputs.dependencies }}
         GW: ${{ inputs.gateway_url }}
 
     - name: 'Mint ROOT_USER_TOKEN (no secret) + inject non-secret env'
@@ -299,7 +275,7 @@ runs:
       # service-principal secret. The token's aud=<aad_client_id> matches the istio RequestAuthentication
       # audience + the Spring AAD filter; an app-only token (no upn/unique_name, iss=sts.windows.net) is
       # authorized as a service principal by services that trust AAD SPs (e.g. partition's domain-admin check).
-      # env_map carries NON-SECRET config (e.g. PARTITION_BASE_URL, MY_TENANT) the suite reads from the env.
+      # The resolved descriptor bindings carry non-secret config the suite reads from the env.
       run: |
         if [ -n "$AAD_CLIENT_ID" ]; then
           TOKEN=$(az account get-access-token --resource "$AAD_CLIENT_ID" --query accessToken -o tsv)
@@ -343,13 +319,18 @@ runs:
         fi
       env:
         AAD_CLIENT_ID: ${{ inputs.aad_client_id }}
-        ROOT_TOKEN_ENV: ${{ inputs.root_token_env }}
-        ENV_MAP: ${{ inputs.env_map }}
+        ROOT_TOKEN_ENV: ${{ steps.contract.outputs.root_token_env }}
+        ENV_MAP: ${{ steps.contract.outputs.env_map }}
 
     - name: 'Load acceptance-test secrets from Key Vault (masked, multiline-safe)'
+      if: ${{ steps.contract.outputs.secret_map != '{}' }}
       shell: bash
       run: |
         set -euo pipefail
+        if [ -z "$KV" ]; then
+          echo "::error::keyvault_name is required by descriptor keyVaultBindings."
+          exit 1
+        fi
         if ! jq -e 'type == "object"' >/dev/null 2>&1 <<< "$MAP"; then
           echo "::error::secret_map must be a JSON object of env-var-name -> Key Vault secret name (got: $MAP)"
           exit 1
@@ -375,10 +356,10 @@ runs:
         done
       env:
         KV: ${{ inputs.keyvault_name }}
-        MAP: ${{ inputs.secret_map }}
+        MAP: ${{ steps.contract.outputs.secret_map }}
 
     - name: 'Mint no-data-access token (isolated OIDC login)'
-      if: ${{ inputs.no_data_access_token_env != '' }}
+      if: ${{ steps.contract.outputs.no_data_access_token_env != '' }}
       shell: bash
       run: |
         set -euo pipefail
@@ -465,7 +446,7 @@ runs:
         AAD_CLIENT_ID: ${{ inputs.aad_client_id }}
         AZURE_TENANT_ID: ${{ inputs.azure_tenant_id }}
         NO_DATA_ACCESS_CLIENT_ID: ${{ inputs.no_data_access_client_id }}
-        NO_DATA_ACCESS_TOKEN_ENV: ${{ inputs.no_data_access_token_env }}
+        NO_DATA_ACCESS_TOKEN_ENV: ${{ steps.contract.outputs.no_data_access_token_env }}
 
     - name: 'Run acceptance tests (retry on flake)'
       id: tests
@@ -475,15 +456,14 @@ runs:
         # GitHub expands ${{ }} into the script text BEFORE bash parses it, so a
         # value containing shell metacharacters would become executable code.
         # Reading them as shell variables keeps them data.
-        TEST_TYPE: ${{ inputs.test_type }}
-        TEST_DIR: ${{ inputs.test_dir }}
-        PYTHON_RUNNER: ${{ inputs.python_runner }}
-        MAVEN_PROFILE: ${{ inputs.maven_profile }}
-        MAVEN_GOAL: ${{ inputs.maven_goal }}
+        TEST_TYPE: ${{ steps.contract.outputs.test_type }}
+        TEST_DIR: ${{ steps.contract.outputs.test_dir }}
+        PYTHON_RUNNER: ${{ steps.contract.outputs.python_runner }}
+        MAVEN_ARGUMENTS: ${{ steps.contract.outputs.maven_arguments }}
         GATEWAY_URL: ${{ inputs.gateway_url }}
       with:
-        timeout_minutes: ${{ inputs.timeout_minutes }}
-        max_attempts: ${{ inputs.max_attempts }}
+        timeout_minutes: ${{ steps.contract.outputs.timeout_minutes }}
+        max_attempts: ${{ steps.contract.outputs.max_attempts }}
         # GATEWAY_URL is exported so acceptance suites that read it from the environment
         # (e.g. PARTITION_BASE_URL derivations) pick it up; KV-sourced env vars are already
         # in GITHUB_ENV from the previous step.
@@ -491,19 +471,11 @@ runs:
           cd "$TEST_DIR"
           case "$TEST_TYPE" in
             maven)
-              # maven_goal is a goal list plus flags, so it is intentionally word-split;
-              # `set -f` stops the shell additionally glob-expanding any of those words.
-              set -f
-              if [ -n "$MAVEN_PROFILE" ]; then
-                set -- --batch-mode --no-transfer-progress -P "$MAVEN_PROFILE" $MAVEN_GOAL
-              else
-                set -- --batch-mode --no-transfer-progress $MAVEN_GOAL
-              fi
-              set +f
-              mvn "$@"
+              mapfile -t maven_args < <(jq -er '.[]' <<< "$MAVEN_ARGUMENTS")
+              mvn --batch-mode --no-transfer-progress "${maven_args[@]}"
               ;;
             python)
-              report_dir="$PWD/.spi-integration-results"
+              report_dir="$PWD/spi-integration-results"
               rm -rf -- "$report_dir"
               mkdir -p "$report_dir"
               TEST_REPO_ROOT="$GITHUB_WORKSPACE" \
@@ -522,7 +494,7 @@ runs:
           --github-output "$GITHUB_OUTPUT"
       env:
         ACTION_PATH: ${{ github.action_path }}
-        TEST_DIR: ${{ inputs.test_dir }}
+        TEST_DIR: ${{ steps.contract.outputs.test_dir }}
 
     - name: 'Upload JUnit results'
       id: report
@@ -531,9 +503,9 @@ runs:
       with:
         name: integration-test-results-${{ inputs.deployment_name }}
         path: |
-          ${{ inputs.test_dir }}/**/target/surefire-reports/*.xml
-          ${{ inputs.test_dir }}/**/target/failsafe-reports/*.xml
-          ${{ inputs.test_dir }}/.spi-integration-results/*.xml
+          ${{ steps.contract.outputs.test_dir }}/**/target/surefire-reports/*.xml
+          ${{ steps.contract.outputs.test_dir }}/**/target/failsafe-reports/*.xml
+          ${{ steps.contract.outputs.test_dir }}/spi-integration-results/*.xml
         if-no-files-found: ignore
 
     - name: 'Compute test_result + summary'
@@ -605,7 +577,7 @@ runs:
         DEPLOYMENT: ${{ inputs.deployment_name }}
         ARTIFACT_URL: ${{ steps.report.outputs.artifact-url }}
         EXPECTED_DIGEST: ${{ inputs.expected_digest }}
-        NO_DATA_TOKEN_ENV: ${{ inputs.no_data_access_token_env }}
+        NO_DATA_TOKEN_ENV: ${{ steps.contract.outputs.no_data_access_token_env }}
         ATTEMPTS: ${{ steps.tests.outputs.total_attempts }}
         TESTS: ${{ steps.junit.outputs.tests }}
         FAILURES: ${{ steps.junit.outputs.failures }}
