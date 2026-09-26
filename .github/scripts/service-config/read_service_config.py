@@ -2,8 +2,8 @@
 """Read and validate the fork-owned service descriptor for the copied workflows.
 
 Emits the fixed `read-service-config` output contract (ADR-039). The descriptor
-never yields shell commands, credentials or deployment targets — only closed
-enums, names and paths.
+never yields shell commands or credential values — only schema-constrained
+build and test data.
 
 Usage:
   read_service_config.py --root . --service-name partition --format github \
