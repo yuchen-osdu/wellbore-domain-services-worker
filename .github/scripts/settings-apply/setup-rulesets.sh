@@ -60,38 +60,53 @@ if [[ -z "${GH_TOKEN:-}" ]] && [[ "$DRY_RUN" != "true" ]]; then
 fi
 export GH_TOKEN
 
-# Deploy-readiness gate. SERVICE_NAME / MAVEN_PROFILE default at runtime (ADR-035/037), so they
-# do NOT gate deploy; only the genuinely-required deploy/test inputs do.
+# Deploy-readiness gate. Service-specific build/test intent comes from the
+# descriptor; only environment bindings and a successful first canary gate
+# required deploy/test checks.
 deploy_ready() {
-  local ready=true name
+  local ready=true name source
   local variable_names
-  local variables_json no_data_token_env build_lane config_json
+  local variables_json config_json acceptance_config
   variables_json="$(gh api --paginate --slurp "repos/${REPO_FULL_NAME}/actions/variables?per_page=100" 2>/dev/null || echo '[{"variables":[]}]')"
   variable_names="$(jq -r '.[].variables[].name' <<< "$variables_json")"
-  no_data_token_env="$(jq -r '[.[].variables[] | select(.name == "NO_DATA_ACCESS_TOKEN_ENV") | .value][0] // ""' <<< "$variables_json")"
+  have_var() { grep -qx "$1" <<< "$variable_names"; }
+  var_value() {
+    jq -r --arg name "$1" '[.[].variables[] | select(.name == $name) | .value][0] // ""' \
+      <<< "$variables_json"
+  }
   # `spi onboard` writes the deploy identity as both an encrypted secret and this
   # non-sensitive variable. The GitHub App token used here cannot reliably list
   # Actions secret names, so use the paired variable as the readiness marker.
   # azure/login remains the final fail-closed check for the secret itself.
-  grep -qx "AZURE_CLIENT_ID" <<< "$variable_names" || ready=false
-  for name in ACCEPTANCE_TEST_SECRET_MAP ACCEPTANCE_TEST_DEPENDENCIES K8S_DEPLOYMENT_NAME K8S_CONTAINER_NAME; do
-    grep -qx "$name" <<< "$variable_names" || ready=false
+  for name in AZURE_CLIENT_ID AAD_CLIENT_ID AKS_RESOURCE_GROUP AKS_CLUSTER_NAME \
+    K8S_NAMESPACE FLUX_NAMESPACE K8S_DEPLOYMENT_NAME K8S_CONTAINER_NAME \
+    GATEWAY_URL DATA_PARTITION_ID; do
+    have_var "$name" || ready=false
   done
-  build_lane=""
+  [[ "$(var_value DEPLOY_VALIDATED)" == "true" ]] || ready=false
+
+  acceptance_config=""
   if [[ -f ".github/scripts/service-config/read_service_config.py" ]]; then
     config_json="$(python3 .github/scripts/service-config/read_service_config.py --root . --format json --redact 2>/dev/null || true)"
     if [[ -n "$config_json" ]] && jq empty <<< "$config_json" 2>/dev/null; then
-      build_lane="$(jq -r '.build_lane // ""' <<< "$config_json")"
+      acceptance_config="$(jq -r '.acceptance_config // ""' <<< "$config_json")"
     fi
   fi
-  if [[ "$build_lane" == "python" ]]; then
-    [[ "$(jq -r '.python_acceptance_test_path // ""' <<< "$config_json")" != "" ]] || ready=false
-    [[ "$(jq -r '.python_acceptance_runner_path // ""' <<< "$config_json")" != "" ]] || ready=false
+  if [[ -z "$acceptance_config" ]] || ! jq -e 'type == "object"' >/dev/null 2>&1 <<< "$acceptance_config"; then
+    ready=false
   else
-    grep -qx "ACCEPTANCE_TEST_DIR" <<< "$variable_names" || ready=false
-  fi
-  if [[ -n "$no_data_token_env" ]]; then
-    grep -qx "NO_DATA_ACCESS_TESTER_CLIENT_ID" <<< "$variable_names" || ready=false
+    if [[ "$(jq -r '.keyVaultBindings | length' <<< "$acceptance_config")" -gt 0 ]]; then
+      have_var KEYVAULT_NAME || ready=false
+    fi
+    if [[ -n "$(jq -r '.noDataAccessTokenEnv // ""' <<< "$acceptance_config")" ]]; then
+      have_var NO_DATA_ACCESS_TESTER_CLIENT_ID || ready=false
+    fi
+    while IFS= read -r source; do
+      case "$source" in
+        entitlementDomain) have_var ENTITLEMENT_DOMAIN || ready=false ;;
+        storageAccount) have_var STORAGE_ACCOUNT_NAME || ready=false ;;
+      esac
+    done < <(jq -r '.bindings | to_entries[].value.source' <<< "$acceptance_config")
   fi
   [[ "$ready" == "true" ]]
 }

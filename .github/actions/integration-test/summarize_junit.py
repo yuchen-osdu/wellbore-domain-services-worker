@@ -71,7 +71,7 @@ def discover_reports(test_dir: Path) -> list[Path]:
         )
     reports.update(
         path.resolve()
-        for path in (test_dir / ".spi-integration-results").glob("*.xml")
+        for path in (test_dir / "spi-integration-results").glob("*.xml")
         if path.is_file()
     )
     return sorted(reports)
