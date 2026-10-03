@@ -1571,48 +1571,6 @@ wheels = [
 ]
 
 [[package]]
-name = "opentelemetry-exporter-otlp-proto-common"
-version = "1.40.0"
-source = { registry = "https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple/" }
-dependencies = [
-    { name = "opentelemetry-proto" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/51/bc/1559d46557fe6eca0b46c88d4c2676285f1f3be2e8d06bb5d15fbffc814a/opentelemetry_exporter_otlp_proto_common-1.40.0.tar.gz", hash = "sha256:1cbee86a4064790b362a86601ee7934f368b81cd4cc2f2e163902a6e7818a0fa", size = 20416, upload-time = "2026-03-04T14:17:23.801Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/8b/ca/8f122055c97a932311a3f640273f084e738008933503d0c2563cd5d591fc/opentelemetry_exporter_otlp_proto_common-1.40.0-py3-none-any.whl", hash = "sha256:7081ff453835a82417bf38dccf122c827c3cbc94f2079b03bba02a3165f25149", size = 18369, upload-time = "2026-03-04T14:17:04.796Z" },
-]
-
-[[package]]
-name = "opentelemetry-exporter-otlp-proto-http"
-version = "1.40.0"
-source = { registry = "https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple/" }
-dependencies = [
-    { name = "googleapis-common-protos" },
-    { name = "opentelemetry-api" },
-    { name = "opentelemetry-exporter-otlp-proto-common" },
-    { name = "opentelemetry-proto" },
-    { name = "opentelemetry-sdk" },
-    { name = "requests" },
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/2e/fa/73d50e2c15c56be4d000c98e24221d494674b0cc95524e2a8cb3856d95a4/opentelemetry_exporter_otlp_proto_http-1.40.0.tar.gz", hash = "sha256:db48f5e0f33217588bbc00274a31517ba830da576e59503507c839b38fa0869c", size = 17772, upload-time = "2026-03-04T14:17:25.324Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/a0/3a/8865d6754e61c9fb170cdd530a124a53769ee5f740236064816eb0ca7301/opentelemetry_exporter_otlp_proto_http-1.40.0-py3-none-any.whl", hash = "sha256:a8d1dab28f504c5d96577d6509f80a8150e44e8f45f82cdbe0e34c99ab040069", size = 19960, upload-time = "2026-03-04T14:17:07.153Z" },
-]
-
-[[package]]
-name = "opentelemetry-proto"
-version = "1.40.0"
-source = { registry = "https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple/" }
-dependencies = [
-    { name = "protobuf" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/4c/77/dd38991db037fdfce45849491cb61de5ab000f49824a00230afb112a4392/opentelemetry_proto-1.40.0.tar.gz", hash = "sha256:03f639ca129ba513f5819810f5b1f42bcb371391405d99c168fe6937c62febcd", size = 45667, upload-time = "2026-03-04T14:17:31.194Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b9/b2/189b2577dde745b15625b3214302605b1353436219d42b7912e77fa8dc24/opentelemetry_proto-1.40.0-py3-none-any.whl", hash = "sha256:266c4385d88923a23d63e353e9761af0f47a6ed0d486979777fe4de59dc9b25f", size = 72073, upload-time = "2026-03-04T14:17:16.673Z" },
-]
-
-[[package]]
 name = "opentelemetry-resourcedetector-gcp"
 version = "1.12.0a0"
 source = { registry = "https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple/" }
@@ -1675,21 +1633,6 @@ source = { registry = "https://community.opengroup.org/api/v4/projects/465/packa
 sdist = { url = "https://community.opengroup.org/api/v4/projects/465/packages/pypi/files/e304932c4eb4d702689156f8a561f5410cd3467224033ab7768f8182d50e0b40/osdu_core_lib_python-0.29.0.tar.gz", hash = "sha256:e304932c4eb4d702689156f8a561f5410cd3467224033ab7768f8182d50e0b40" }
 wheels = [
     { url = "https://community.opengroup.org/api/v4/projects/465/packages/pypi/files/5b82fbab0fd5238e3887c63620f936b841d529a48e8aed80c717cec34830d450/osdu_core_lib_python-0.29.0-py3-none-any.whl", hash = "sha256:5b82fbab0fd5238e3887c63620f936b841d529a48e8aed80c717cec34830d450" },
-]
-
-[[package]]
-name = "osdu-core-lib-python-aws"
-version = "0.29.0"
-source = { registry = "https://community.opengroup.org/api/v4/projects/465/packages/pypi/simple/" }
-dependencies = [
-    { name = "boto3" },
-    { name = "botocore" },
-    { name = "osdu-api" },
-    { name = "requests" },
-]
-sdist = { url = "https://community.opengroup.org/api/v4/projects/465/packages/pypi/files/b8179c121ae65b1394c3835c3e5804adef24eea4b9209646df690e2bcc52718e/osdu_core_lib_python_aws-0.29.0.tar.gz", hash = "sha256:b8179c121ae65b1394c3835c3e5804adef24eea4b9209646df690e2bcc52718e" }
-wheels = [
-    { url = "https://community.opengroup.org/api/v4/projects/465/packages/pypi/files/9c6ab6c5f2923112b1d4ce121d9d433f5cff8a64e82e55687118b444777b7a9b/osdu_core_lib_python_aws-0.29.0-py3-none-any.whl", hash = "sha256:9c6ab6c5f2923112b1d4ce121d9d433f5cff8a64e82e55687118b444777b7a9b" },
 ]
 
 [[package]]
@@ -1789,12 +1732,6 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-aws = [
-    { name = "boto3" },
-    { name = "botocore" },
-    { name = "opentelemetry-exporter-otlp-proto-http" },
-    { name = "osdu-core-lib-python-aws" },
-]
 az = [
     { name = "aiohttp" },
     { name = "azure-monitor-opentelemetry-exporter" },
@@ -1846,9 +1783,7 @@ requires-dist = [
     { name = "anyio", marker = "extra == 'dev'", specifier = ">=4.4.0" },
     { name = "asgi-lifespan", marker = "extra == 'dev'" },
     { name = "azure-monitor-opentelemetry-exporter", marker = "extra == 'az'", specifier = ">=1.0.0b46" },
-    { name = "boto3", marker = "extra == 'aws'" },
     { name = "boto3", marker = "extra == 'baremetal'" },
-    { name = "botocore", marker = "extra == 'aws'" },
     { name = "botocore", marker = "extra == 'baremetal'" },
     { name = "certifi", marker = "extra == 'dev'", specifier = ">=2024.7.4" },
     { name = "cryptography", marker = "extra == 'dev'", specifier = ">=48.0.1" },
@@ -1862,12 +1797,10 @@ requires-dist = [
     { name = "numpy" },
     { name = "opentelemetry-api", specifier = "==1.40.0" },
     { name = "opentelemetry-exporter-gcp-trace", marker = "extra == 'gc'" },
-    { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'aws'", specifier = "==1.40.0" },
     { name = "opentelemetry-sdk", specifier = "==1.40.0" },
     { name = "opentelemetry-semantic-conventions" },
     { name = "osdu-api", marker = "extra == 'baremetal'", specifier = ">=1.2.0" },
     { name = "osdu-core-lib-python", specifier = "==0.29.0" },
-    { name = "osdu-core-lib-python-aws", marker = "extra == 'aws'", specifier = "==0.29.0" },
     { name = "osdu-core-lib-python-azure", marker = "extra == 'az'", specifier = "==0.29.0" },
     { name = "osdu-core-lib-python-baremetal", marker = "extra == 'baremetal'", specifier = "==0.29.0" },
     { name = "osdu-core-lib-python-gcp", marker = "extra == 'gc'", specifier = "==0.29.0" },
@@ -1890,7 +1823,7 @@ requires-dist = [
     { name = "urllib3", specifier = ">=2.7.0" },
     { name = "uvicorn" },
 ]
-provides-extras = ["dev", "az", "aws", "ibm", "gc", "baremetal"]
+provides-extras = ["dev", "az", "ibm", "gc", "baremetal"]
 
 [[package]]
 name = "packaging"
