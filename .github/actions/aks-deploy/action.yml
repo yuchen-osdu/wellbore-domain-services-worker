@@ -14,7 +14,8 @@
 name: 'AKS Deploy (set image by digest)'
 description: >-
   OIDC login, assert Flux is suspended (CI mode), `kubectl set image` by digest, wait for
-  rollout, and emit the previous + deployed digests. By digest only -- tags are never accepted.
+  rollout, and emit the previous immutable image + deployed digest. By digest only -- tags
+  are never accepted.
 
 inputs:
   azure_client_id:
@@ -55,10 +56,20 @@ inputs:
     description: 'Namespace holding the spi-stack Flux Kustomizations, for the CI-mode suspend pre-check. Defaults to flux-system; THIS stack uses osdu-flux (the AKS Flux extension is configured there). Wire from an org variable so it tracks the cluster.'
     required: false
     default: 'flux-system'
+  operation:
+    description: 'Short operation label used only to distinguish deploy/restore diagnostics.'
+    required: false
+    default: 'deploy'
 
 outputs:
+  previous_image:
+    description: 'Complete immutable image reference running BEFORE this operation (<repository>@sha256:<digest>).'
+    value: ${{ steps.capture-previous.outputs.image }}
+  previous_repository:
+    description: 'Image repository running BEFORE this operation.'
+    value: ${{ steps.capture-previous.outputs.repository }}
   previous_digest:
-    description: 'sha256 digest running BEFORE this deploy (captured pre-patch; consumed by restore-deployment.yml per §8.9). Empty when nothing was running.'
+    description: 'sha256 digest running BEFORE this operation.'
     value: ${{ steps.capture-previous.outputs.digest }}
   deployed_digest:
     description: 'sha256 digest running AFTER rollout (read from the live pod; for downstream pin-verification in integration-test).'
@@ -74,15 +85,20 @@ runs:
         tenant-id: ${{ inputs.azure_tenant_id }}
         subscription-id: ${{ inputs.azure_subscription_id }}
 
-    - name: 'Validate image digest format'
+    - name: 'Validate operation and image digest'
       shell: bash
       # Catch the "double sha256:" foot-gun and tag-as-digest mistakes before kubectl runs.
       run: |
+        if ! printf '%s' "$OPERATION" | grep -Eq '^[a-z0-9][a-z0-9._-]*$'; then
+          echo "::error::operation must contain only lowercase letters, numbers, '.', '_' or '-' (got: '$OPERATION')."
+          exit 1
+        fi
         if ! printf '%s' "$IMAGE_DIGEST" | grep -Eq '^sha256:[a-f0-9]{64}$'; then
           echo "::error::image_digest must match ^sha256:[a-f0-9]{64}$ (got: '$IMAGE_DIGEST'). Pass a digest, never a tag."
           exit 1
         fi
       env:
+        OPERATION: ${{ inputs.operation }}
         IMAGE_DIGEST: ${{ inputs.image_digest }}
 
     - name: 'Get AKS credentials'
@@ -141,16 +157,14 @@ runs:
       env:
         FLUX_NS: ${{ inputs.flux_namespace }}
 
-    - name: 'Capture previous digest (for restore)'
+    - name: 'Capture previous immutable image (for restore)'
       id: capture-previous
       shell: bash
       run: |
         IMAGE=$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$NS" -o json \
           | jq -r --arg c "$CONTAINER_NAME" '.spec.template.spec.containers[] | select(.name==$c) | .image')
-        DIGEST="${IMAGE##*@}"
-        if [ "$DIGEST" = "$IMAGE" ]; then DIGEST=""; fi
-        echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
-        echo "Previous digest: ${DIGEST:-<none>}"
+        python "$GITHUB_ACTION_PATH/parse_image_reference.py" "$IMAGE"
+        echo "Previous image: $IMAGE"
       env:
         DEPLOYMENT_NAME: ${{ inputs.deployment_name }}
         CONTAINER_NAME: ${{ inputs.container_name }}
@@ -203,15 +217,18 @@ runs:
       if: failure()
       shell: bash
       run: |
-        mkdir -p deploy-diagnostics
+        DIAGNOSTICS_DIR="${OPERATION}-diagnostics"
+        mkdir -p "$DIAGNOSTICS_DIR"
         {
+          echo "### operation: $OPERATION"
           echo "### deployment/$DEPLOYMENT_NAME (namespace $NS)"
           kubectl describe "deployment/$DEPLOYMENT_NAME" -n "$NS" 2>&1 || true
           echo
           echo "### recent pod logs (--tail=200)"
           kubectl logs "deployment/$DEPLOYMENT_NAME" -n "$NS" --tail=200 --all-containers 2>&1 || true
-        } > "deploy-diagnostics/${DEPLOYMENT_NAME}.txt"
+        } > "$DIAGNOSTICS_DIR/${DEPLOYMENT_NAME}.txt"
       env:
+        OPERATION: ${{ inputs.operation }}
         DEPLOYMENT_NAME: ${{ inputs.deployment_name }}
         NS: ${{ inputs.namespace }}
 
@@ -219,6 +236,6 @@ runs:
       if: failure()
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
       with:
-        name: aks-deploy-diagnostics-${{ inputs.deployment_name }}
-        path: deploy-diagnostics/
+        name: aks-${{ inputs.operation }}-diagnostics-${{ inputs.deployment_name }}
+        path: ${{ inputs.operation }}-diagnostics/
         if-no-files-found: ignore
