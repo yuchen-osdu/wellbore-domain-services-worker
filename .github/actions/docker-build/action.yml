@@ -32,7 +32,7 @@ inputs:
     description: 'Optional --build-arg values (newline-separated KEY=VALUE). Never pass GITHUB_TOKEN here.'
     required: false
   jar_file:
-    description: 'Conventional path/glob of the service Spring Boot JAR (default provider/<service>-azure/target/*-spring-boot.jar, from SERVICE_TARGET_JAR or SERVICE_NAME). If it matches no file the action auto-discovers the Azure JAR; SERVICE_TARGET_JAR is only needed to disambiguate a service that builds more than one. Ignored in source mode.'
+    description: 'Descriptor-selected or conventional path/glob of the service Spring Boot JAR. If it matches no file the action auto-discovers one Azure JAR; services with multiple candidates declare build.artifact.path. Ignored in source mode.'
     required: false
   app_module:
     description: 'Source mode only: the ASGI target baked into the canonical Python image (e.g. wdmsworker.app:app), taken from the descriptor container.appModule. Required in source mode and re-validated before it becomes a build argument.'
