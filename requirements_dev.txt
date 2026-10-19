@@ -40,7 +40,7 @@ distlib==0.4.1
     # via virtualenv
 fastapi==0.136.3
     # via osdu-wbddms-worker
-filelock==3.29.1
+filelock==3.29.7
     # via
     #   python-discovery
     #   virtualenv
