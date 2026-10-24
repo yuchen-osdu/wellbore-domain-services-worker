@@ -41,6 +41,12 @@
           },
           {
             "context": "🐳 Docker Build"
+          },
+          {
+            "context": "🚀 Deploy to spi-stack"
+          },
+          {
+            "context": "🧪 Integration Tests"
           }
         ]
       }
