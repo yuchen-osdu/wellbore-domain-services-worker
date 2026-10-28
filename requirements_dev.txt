@@ -63,8 +63,6 @@ idna==3.18
     #   anyio
     #   httpx
     #   requests
-importlib-metadata==8.7.1
-    # via opentelemetry-api
 iniconfig==2.3.0
     # via pytest
 librt==0.11.0 ; platform_python_implementation != 'PyPy'
@@ -81,14 +79,14 @@ numpy==2.4.6
     # via
     #   osdu-wbddms-worker
     #   pandas
-opentelemetry-api==1.40.0
+opentelemetry-api==1.45.1
     # via
     #   opentelemetry-sdk
     #   opentelemetry-semantic-conventions
     #   osdu-wbddms-worker
-opentelemetry-sdk==1.40.0
+opentelemetry-sdk==1.45.1
     # via osdu-wbddms-worker
-opentelemetry-semantic-conventions==0.61b0
+opentelemetry-semantic-conventions==0.66b1
     # via
     #   opentelemetry-sdk
     #   osdu-wbddms-worker
@@ -186,5 +184,3 @@ uvicorn==0.49.0
     # via osdu-wbddms-worker
 virtualenv==21.4.2
     # via pre-commit
-zipp==4.1.0
-    # via importlib-metadata

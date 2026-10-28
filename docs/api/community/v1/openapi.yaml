@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Wellbore domain services worker
-  version: 0.3.0
+  version: 0.3.1
 paths:
   /about:
     get:
