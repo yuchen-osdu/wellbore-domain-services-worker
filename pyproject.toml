@@ -68,11 +68,6 @@ az = [
     "msal>=1.24.1 "
 ]
 
-ibm = [
-    "aiohttp>=3.8.0",
-    "osdu-core-lib-python-ibm==0.29.0",
-]
-
 gc = [
     "osdu-core-lib-python-gcp==0.29.0",
     "opentelemetry-exporter-gcp-trace",
