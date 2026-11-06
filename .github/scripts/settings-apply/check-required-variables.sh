@@ -8,8 +8,8 @@
 # tracking issue listing what's missing and who owns it; closes that issue when
 # everything is present.
 #
-# SERVICE_NAME / MAVEN_PROFILE / SERVICE_TARGET_JAR are NOT listed: they default
-# at runtime (ADR-035/037), so they never block onboarding — only overrides.
+# Service-specific build and test values are validated through `.spi/service.yaml`.
+# Only environment bindings written by `spi onboard` are checked here.
 #
 # Arguments:
 #   $1            Repository full name (owner/repo)
@@ -43,43 +43,54 @@ ISSUE_TITLE="⚙️ Deploy onboarding: required CI configuration missing"
 
 variables_json="$(gh api --paginate --slurp "repos/${REPO}/actions/variables?per_page=100" 2>/dev/null || echo '[{"variables":[]}]')"
 variable_names="$(jq -r '.[].variables[].name' <<< "$variables_json")"
-no_data_token_env="$(jq -r '[.[].variables[] | select(.name == "NO_DATA_ACCESS_TOKEN_ENV") | .value][0] // ""' <<< "$variables_json")"
 READ_SERVICE_CONFIG=".github/scripts/service-config/read_service_config.py"
 config_json=""
-build_lane=""
-python_acceptance_test_path=""
-python_acceptance_runner_path=""
+acceptance_config=""
 if [[ -f "$READ_SERVICE_CONFIG" ]]; then
   config_json="$(python3 "$READ_SERVICE_CONFIG" --root . --format json --redact 2>/dev/null || true)"
   if [[ -n "$config_json" ]] && jq empty <<< "$config_json" 2>/dev/null; then
-    build_lane="$(jq -r '.build_lane // ""' <<< "$config_json")"
-    python_acceptance_test_path="$(jq -r '.python_acceptance_test_path // ""' <<< "$config_json")"
-    python_acceptance_runner_path="$(jq -r '.python_acceptance_runner_path // ""' <<< "$config_json")"
+    acceptance_config="$(jq -r '.acceptance_config // ""' <<< "$config_json")"
   fi
 fi
 
 missing=()
 have_var()    { grep -qx "$1" <<< "$variable_names"; }
+var_value() {
+  jq -r --arg name "$1" '[.[].variables[] | select(.name == $name) | .value][0] // ""' \
+    <<< "$variables_json"
+}
 
 have_var "AZURE_CLIENT_ID" || missing+=("deploy identity \`AZURE_CLIENT_ID\` — set by \`spi onboard\`")
-for v in K8S_DEPLOYMENT_NAME K8S_CONTAINER_NAME; do
+for v in AAD_CLIENT_ID AKS_RESOURCE_GROUP AKS_CLUSTER_NAME K8S_NAMESPACE FLUX_NAMESPACE \
+  K8S_DEPLOYMENT_NAME K8S_CONTAINER_NAME GATEWAY_URL DATA_PARTITION_ID; do
   have_var "$v" || missing+=("variable \`$v\` — set by \`spi onboard\`")
 done
-if [[ -n "$no_data_token_env" ]]; then
-  have_var "NO_DATA_ACCESS_TESTER_CLIENT_ID" \
-    || missing+=("variable \`NO_DATA_ACCESS_TESTER_CLIENT_ID\` — set by \`spi onboard\` for negative-authorization tests")
-fi
-for v in ACCEPTANCE_TEST_SECRET_MAP ACCEPTANCE_TEST_DEPENDENCIES; do
-  have_var "$v" || missing+=("variable \`$v\` — set by the operator")
-done
-if [[ "$build_lane" == "python" ]]; then
-  [[ -n "$python_acceptance_test_path" ]] \
-    || missing+=("descriptor field \`tests.acceptance.path\` — Python live-test working directory")
-  [[ -n "$python_acceptance_runner_path" ]] \
-    || missing+=("descriptor field \`tests.acceptance.runnerPath\` — Python live-test runner")
+[[ "$(var_value DEPLOY_VALIDATED)" == "true" ]] \
+  || missing+=("successful first canary \`DEPLOY_VALIDATED=true\` — set by \`spi onboard --verify\`")
+
+if [[ -z "$acceptance_config" ]] || ! jq -e 'type == "object"' >/dev/null 2>&1 <<< "$acceptance_config"; then
+  missing+=("descriptor field \`tests.acceptance\` — complete branch-tracked live-test contract")
 else
-  have_var "ACCEPTANCE_TEST_DIR" \
-    || missing+=("variable \`ACCEPTANCE_TEST_DIR\` — set by the operator")
+  if [[ "$(jq -r '.keyVaultBindings | length' <<< "$acceptance_config")" -gt 0 ]]; then
+    have_var KEYVAULT_NAME \
+      || missing+=("variable \`KEYVAULT_NAME\` — required by descriptor keyVaultBindings")
+  fi
+  if [[ -n "$(jq -r '.noDataAccessTokenEnv // ""' <<< "$acceptance_config")" ]]; then
+    have_var NO_DATA_ACCESS_TESTER_CLIENT_ID \
+      || missing+=("variable \`NO_DATA_ACCESS_TESTER_CLIENT_ID\` — set by \`spi onboard\` for negative-authorization tests")
+  fi
+  while IFS= read -r source; do
+    case "$source" in
+      entitlementDomain)
+        have_var ENTITLEMENT_DOMAIN \
+          || missing+=("variable \`ENTITLEMENT_DOMAIN\` — discovered by \`spi onboard\`")
+        ;;
+      storageAccount)
+        have_var STORAGE_ACCOUNT_NAME \
+          || missing+=("variable \`STORAGE_ACCOUNT_NAME\` — discovered by \`spi onboard\`")
+        ;;
+    esac
+  done < <(jq -r '.bindings | to_entries[].value.source' <<< "$acceptance_config")
 fi
 
 # --- Service descriptor + descriptor ownership (ADR-039) ---------------------
@@ -127,7 +138,7 @@ fi
 echo "⚠️ Missing ${#missing[@]} required item(s) for deploy onboarding:"
 printf '   - %s\n' "${missing[@]}"
 
-body="$(printf 'The deploy and integration-test required checks stay disabled until the following are set on this repository:\n\n'; printf -- '- [ ] %s\n' "${missing[@]}"; printf '\nBuild-side identity (`SERVICE_NAME`, `MAVEN_PROFILE`, `SERVICE_TARGET_JAR`) defaults at runtime and is not required.\nService-descriptor findings list field paths and error codes only; no descriptor, secret or variable value is reproduced here.\n\n_Maintained automatically by `settings-apply.yml`._\n')"
+body="$(printf 'The deploy and integration-test required checks stay disabled until the following are set on this repository:\n\n'; printf -- '- [ ] %s\n' "${missing[@]}"; printf '\nService-specific build and acceptance-test configuration belongs in `.spi/service.yaml`; environment identity and cluster bindings are written by `spi onboard`.\nService-descriptor findings list field paths and error codes only; no descriptor, secret or variable value is reproduced here.\n\n_Maintained automatically by `settings-apply.yml`._\n')"
 
 if [[ "$DRY_RUN" == "true" ]]; then
   echo "DRY-RUN would $( [[ -n "$existing_issue" ]] && echo "update issue #$existing_issue" || echo "open a human-required issue" )"
