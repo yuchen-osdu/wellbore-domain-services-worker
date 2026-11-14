@@ -286,13 +286,23 @@ def dump_df(df: pd.DataFrame, content_type: MimeType, orient: JSONOrient | None 
             return to_parquet_v0(df)
 
     if content_type == MimeTypes.JSON:
+        # Do not fill NaN with the string "NaN" here. A null in the source data is
+        # meaningful information (e.g. "no measurement was recorded") and must
+        # round-trip back to the client as JSON null, not as the string "NaN".
+        # This matters in particular for legacy-data migration: a null attribute
+        # value is a fact to be preserved, not a placeholder to be substituted.
+        # Modern pandas already serialises np.nan as valid JSON null, so no
+        # substitution is required. The load path keeps .replace("NaN", np.nan)
+        # only for backward compatibility with blobs previously stored with the
+        # literal string "NaN".
+        #
         # pandas' ``to_json`` defaults ``double_precision`` to 10, which silently
         # truncates float64 values that carry more than 10 digits after the decimal
         # point (curve values are stored as float64 and stay bit-exact in Parquet,
         # so the truncation only affects the JSON response). We raise the default
         # to the pandas maximum of 15 so JSON responses preserve as much precision
         # as pandas' JSON writer allows.
-        return df.fillna("NaN").to_json(
+        return df.to_json(
             orient=(orient or JSONOrient.Split).value,
             index=True,
             date_format="iso",

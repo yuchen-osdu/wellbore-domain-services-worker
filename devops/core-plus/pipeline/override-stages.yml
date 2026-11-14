@@ -12,22 +12,18 @@ cimpl-containerize-gitlab:
 cimpl-containerize-bootstrap-gitlab:
   needs: []
 
-cimpl-deploy:
-  before_script:
-    - echo "Deploying a new App version..."
-
-cimpl-test-python:
+cimpl-prod-test-python:
   rules:
     - exists:
         - never/existing/file.txt
 
-#dev2 jobs
+# OSDU MAIN Jobs
+cimpl-dev-test-python:
+  rules:
+    - exists:
+        - never/existing/file.txt
 
-cimpl-dev2-deploy:
-  before_script:
-    - echo "Deploying a new App version..."
-    
-cimpl-dev2-test-python:
+cimpl-dev-backup-test-python:
   rules:
     - exists:
         - never/existing/file.txt
