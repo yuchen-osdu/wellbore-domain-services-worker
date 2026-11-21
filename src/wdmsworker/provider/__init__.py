@@ -15,14 +15,6 @@ def initialize_for_provider(provider: str, app: FastAPI) -> ModuleType:
         from . import azure
 
         provider_module = azure  # type: ignore
-    elif provider == "aws":
-        from . import aws
-
-        provider_module = aws  # type: ignore
-    elif provider == "ibm":
-        from . import ibm
-
-        provider_module = ibm  # type: ignore
     elif provider == "gc":
         from . import gc
 

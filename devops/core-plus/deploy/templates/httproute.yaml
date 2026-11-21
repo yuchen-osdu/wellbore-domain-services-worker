@@ -1,0 +1,38 @@
+{{- if .Values.httpRoute.enabled }}
+{{- $hostnames := .Values.httpRoute.hostnames }}
+{{- if not $hostnames }}
+{{- if .Values.global.hostname }}
+{{- $hostnames = list .Values.global.hostname }}
+{{- end }}
+{{- end }}
+{{- if not $hostnames }}
+{{- fail "httpRoute.enabled requires httpRoute.hostnames or global.hostname" }}
+{{- end }}
+{{- $backend := .Values.conf.appName }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ default (printf "%s-route" .Release.Name) .Values.httpRoute.name | quote }}
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+    app: {{ .Values.conf.appName | quote }}
+spec:
+  parentRefs:
+    {{- toYaml .Values.httpRoute.parentRefs | nindent 4 }}
+  hostnames:
+    {{- toYaml $hostnames | nindent 4 }}
+  rules:
+    {{- range .Values.httpRoute.routes }}
+    - matches:
+        - path:
+            type: {{ default "PathPrefix" .pathType }}
+            value: {{ .path | quote }}
+      {{- with .filters }}
+      filters:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      backendRefs:
+        - name: {{ default $backend .serviceName | quote }}
+          port: {{ default 80 .port }}
+    {{- end }}
+{{- end }}
