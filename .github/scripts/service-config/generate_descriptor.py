@@ -319,8 +319,8 @@ HEADER = """# Service descriptor — owned by this repository, not by the templa
 #
 # Template-sync never overwrites `.spi/**`. Changes here are normal reviewed
 # pull requests and select only unprivileged build/test behaviour: no Azure
-# identity, cluster, namespace, environment, secret or workflow reference may
-# appear in this file (ADR-039).
+# identity, cluster, namespace, credential, secret value or workflow reference
+# may appear in this file (ADR-039).
 #
 # Schema: .github/scripts/service-config/schema.json
 # Generated during repository initialization; edit as the service evolves.
@@ -330,7 +330,7 @@ HEADER = """# Service descriptor — owned by this repository, not by the templa
 def render_descriptor(archetype: str, service_name: str, root: Path, app_module: str = "") -> str:
     lines = [
         HEADER,
-        "schemaVersion: 1",
+        "schemaVersion: 2",
         "",
         "service:",
         f"  name: {service_name}",
