@@ -23,12 +23,6 @@ variables:
   STORAGE_ACCOUNT_NAME: $STORAGE_ACCOUNT_NAME
   AZURE_SKIP_TEST: "true"
 
-  AWS_BUILD_SUBDIR: provider/os-wellbore-ddms-worker-aws/build-aws
-  AWS_EKS_DEPLOYMENT_NAME: os-wellbore-ddms-worker
-  AWS_SERVICE_NAMESPACE_SUFFIX: wellbore-ddms
-  AWS_SERVICE: wellbore-ddms-worker
-  AWS_DEPLOY_TARGET: TF
-
   PYTHON_IMAGE: "python:3.13-slim"
 
 include:
@@ -48,18 +42,15 @@ include:
 
   - local: "devops/core-plus/pipeline/override-stages.yml"
 
-  - project: "osdu/platform/ci-cd-pipelines"
-    file: "cloud-providers/aws-global.yml"
-
   - project: "osdu/platform/domain-data-mgmt-services/wellbore/lib/lib-registry"
     file: "registry-setup.yml"
 
 .default:
   script:
     # uv.lock (resolved from pyproject.toml) is the source of truth. Install the
-    # locked dev + aws environment and activate it for the job's commands.
+    # locked dev environment and activate it for the job's commands.
     - python -m pip install --upgrade pip "uv==0.11.19"
-    - uv sync --locked --extra dev --extra aws
+    - uv sync --locked --extra dev
     - . .venv/bin/activate
 
 stages:
@@ -167,13 +158,6 @@ trusted-merge-branch-verification:
   image: $CI_REGISTRY/osdu/platform/trusted-mr-container
   before_script:
     - echo "overriding before script"
-
-aws-containerize:
-  needs: []
-  allow_failure: true
-
-aws-update-tf:
-  allow_failure: true
 
 gc-helm-charts-gitlab:
   allow_failure: true
