@@ -50,7 +50,7 @@ never receive `packages: write`.
 | `registry` | No | `ghcr.io` | Container registry host |
 | `org` | No | _(repo owner)_ | Registry org/owner; falls back to the workflow `github.repository_owner` at runtime when omitted |
 | `jar_artifact_name` | No | `build-artifacts` | Name of the artifact containing the built JARs (java-artifact mode) |
-| `jar_file` | No | — | Conventional path/glob of the service Spring Boot JAR (`validate.yml` passes `provider/<SERVICE_NAME>-azure/target/*-spring-boot.jar`, from `SERVICE_TARGET_JAR` or `SERVICE_NAME`). If it matches no file the action auto-discovers the Azure JAR (deviant modules like `entitlements-v2-azure`); `SERVICE_TARGET_JAR` only disambiguates a service that builds more than one. Ignored in `source` mode |
+| `jar_file` | No | — | Descriptor `build.artifact.path` or the conventional `provider/<service>-azure/target/*-spring-boot.jar`. If neither matches, the action auto-discovers one Azure JAR; multiple candidates must be disambiguated in the descriptor. Ignored in `source` mode |
 | `app_module` | Source mode | — | ASGI target baked into the Python image (`wdmsworker.app:app`), from the descriptor's `container.appModule`. Re-validated before it becomes a build argument |
 | `runtime_extras` | No | — | Comma-separated extras installed into the runtime image (e.g. `az`), from `build.python.runtimeExtras` |
 | `platforms` | No | — | Explicit platform list (e.g. `linux/amd64`). Empty keeps the Java defaults: amd64 on validate-only, amd64+arm64 on push |
